@@ -1,4 +1,4 @@
-# Project Setup
+# Up
 
 This document provides instructions on how to setup this repository and install Expo on iOS for testing.
 
