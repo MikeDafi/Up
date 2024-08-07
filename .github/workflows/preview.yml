@@ -1,5 +1,5 @@
 name: preview
-on: push
+on: pull_request
 
 jobs:
   update:
@@ -33,6 +33,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Init update
+        run: eas init --non-interactive --id ee49cdfd-2074-4d04-a576-12a25e22f8b2
 
       - name: Create preview
         uses: expo/expo-github-action/preview@v8
