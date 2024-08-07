@@ -31,4 +31,8 @@ jobs:
       - name: Run linters
         uses: wearerequired/lint-action@v2
         with:
-          # Enable your linters here
+          # Enable linters as needed
+          eslint: true       # JavaScript/TypeScript linter
+          stylelint: true    # CSS linter
+          yamllint: true     # YAML linter
+          markdownlint: true # Markdown linter
