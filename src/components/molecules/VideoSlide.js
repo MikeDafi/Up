@@ -25,7 +25,7 @@ const VideoSlide = ({ videos, onEnd }) => {
     };
 
     return (
-        <View style={{ flex: 1 }}>
+        <View style={{ }}>
             <FlatList
                 data={videos}
                 horizontal
