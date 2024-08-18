@@ -20,7 +20,7 @@ jobs:
 
       # Lint files using npx to ensure ESLint is found
       - name: Run ESLint
-        run: npx eslint . --quiet --ext js,jsx,ts,tsx
+        run: eslint . --quiet --ext js,jsx,ts,tsx
 
       # Optionally, continue to use the action for annotations, if preferred
       - uses: sibiraj-s/action-eslint@v3
