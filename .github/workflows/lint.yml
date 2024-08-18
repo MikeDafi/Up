@@ -14,7 +14,15 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 16
-      - run: npm ci # or yarn install
+
+      # Install dependencies
+      - run: npm ci # or `npm install` or `yarn install`
+
+      # Lint files using npx to ensure ESLint is found
+      - name: Run ESLint
+        run: npx eslint . --ignore-path=.gitignore --quiet --ext js,jsx,ts,tsx
+
+      # Optionally, continue to use the action for annotations, if preferred
       - uses: sibiraj-s/action-eslint@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }} # optional
