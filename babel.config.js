@@ -25,6 +25,16 @@ module.exports = function (api) {
           allowUndefined: false,
         },
       ],
+      [
+        'module-resolver',
+        {
+          root: ['./'],
+          alias: {
+            '@assets': './assets',
+            // Add more aliases as needed
+          },
+        },
+      ],
     ],
   };
 };
