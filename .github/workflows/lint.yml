@@ -13,14 +13,14 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
         with:
-          node-version: 16
+          node-version: 18
 
       # Install dependencies
       - run: npm ci # or `npm install` or `yarn install`
 
       # Lint files using npx to ensure ESLint is found
       - name: Run ESLint
-        run: npx eslint . --ignore-path=.gitignore --quiet --ext js,jsx,ts,tsx
+        run: npx eslint . --quiet --ext js,jsx,ts,tsx
 
       # Optionally, continue to use the action for annotations, if preferred
       - uses: sibiraj-s/action-eslint@v3
