@@ -1,22 +1,24 @@
-import React, { useContext } from 'react';
-import { View, StyleSheet } from 'react-native';
+import React from 'react';
+import {StyleSheet, View} from 'react-native';
 import VideoSlide from './VideoSlide';
 import VideoProvider from './VideoProvider';
 import VideoSlideController from './VideoSlideController';
 import PropTypes from 'prop-types';
-import { VideoFeedType } from '../atoms/constants';
-
 
 const VideoWrapper = ({video_feed_type}) => {
 
     return (
         <View style={styles.wrapper}>
             <VideoProvider video_feed_type={video_feed_type}>
-                <VideoSlide />
-                <VideoSlideController />
+                <VideoSlide/>
+                <VideoSlideController/>
             </VideoProvider>
         </View>
     );
+};
+
+VideoWrapper.propTypes = {
+    video_feed_type: PropTypes.string.isRequired,
 };
 
 const styles = StyleSheet.create({

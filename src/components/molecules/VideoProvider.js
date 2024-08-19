@@ -1,6 +1,7 @@
-import React, {useState} from 'react';
-import {StyleSheet} from 'react-native';
+import React, {useContext, useState} from 'react';
 import {VideoFeedType} from '../atoms/constants';
+import PropTypes from 'prop-types';
+
 export const VideoContext = React.createContext();
 
 const video_focused_feed = [
@@ -20,7 +21,8 @@ const VideoProvider = ({children, video_feed_type}) => {
     const [isMuted, setMuted] = useState(true);
     const [isLiked, setLiked] = useState(false);
     const [isPaused, setPaused] = useState(false);
-    const [isBackArrowPressed, setBackArrowPressed] = useState(false);
+
+    const {flatListRef} = useContext(VideoContext);
 
     const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
     // temporary solution to get the video paths until we have a backend
@@ -35,7 +37,9 @@ const VideoProvider = ({children, video_feed_type}) => {
     };
 
     const providerHandleArrowPress = () => {
-        // Define your arrow press handler here
+        if (flatListRef.current && currentVideoIndex > 0) {
+            flatListRef.current.scrollToIndex({index: currentVideoIndex - 1, animated: true});
+        }
     };
 
     const providerHandlePausePress = () => {
@@ -45,6 +49,9 @@ const VideoProvider = ({children, video_feed_type}) => {
     const providerHandlePlaybackStatusUpdate = ({didJustFinish}) => {
         if (didJustFinish && currentVideoIndex < video_paths.length - 1) {
             setCurrentVideoIndex(currentVideoIndex + 1);
+        }
+        if (flatListRef.current) {
+            flatListRef.current.scrollToIndex({index: currentVideoIndex, animated: true});
         }
     };
 
@@ -70,16 +77,9 @@ const VideoProvider = ({children, video_feed_type}) => {
     );
 };
 
-const styles = StyleSheet.create({
-    wrapper: {
-        borderWidth: 2,
-        flex: 1,
-        borderColor: 'white', // Change this to the color you want
-    },
-    container: {
-        flex: 1,
-        backgroundColor: '#123',
-    },
-});
+VideoProvider.propTypes = {
+    children: PropTypes.node,
+    video_feed_type: PropTypes.oneOf(Object.values(VideoFeedType)),
+};
 
 export default VideoProvider;

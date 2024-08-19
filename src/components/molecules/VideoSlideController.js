@@ -1,9 +1,9 @@
-import React, {useState, useContext} from 'react';
-import {StyleSheet, TouchableOpacity, View, Image} from 'react-native';
+import React, {useContext} from 'react';
+import {Image, StyleSheet, TouchableOpacity, View} from 'react-native';
 import {VideoContext} from './VideoProvider';
 
 const VideoSlideController = () => {
-    const { isMuted, isLiked, providerHandleMutedPress, providerHandleLikePress, providerHandleArrowPress } = useContext(VideoContext);
+    const {isMuted, isLiked, providerHandleMutedPress, providerHandleLikePress, providerHandleArrowPress} = useContext(VideoContext);
 
     return (
         <View style={styles.container}>
@@ -20,7 +20,7 @@ const VideoSlideController = () => {
                 />
             </TouchableOpacity>
             <TouchableOpacity onPress={providerHandleArrowPress} style={styles.iconContainer}>
-                <Image source={require('@assets/icons/back_arrow.png')} style={styles.icon} />
+                <Image source={require('@assets/icons/back_arrow.png')} style={styles.icon}/>
             </TouchableOpacity>
         </View>
     );
