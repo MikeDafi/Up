@@ -21,11 +21,3 @@ jobs:
       # Lint files using npx to ensure ESLint is found
       - name: Run ESLint
         run: npx eslint . --quiet
-
-      # Optionally, continue to use the action for annotations, if preferred
-      - uses: sibiraj-s/action-eslint@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }} # optional
-          eslint-args: '--ignore-path=.gitignore --quiet'
-          extensions: 'js,jsx,ts,tsx'
-          annotations: true
