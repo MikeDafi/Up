@@ -9,10 +9,9 @@ const VideosScreen = () => {
     return (
         <View style={styles.videosScreenContainer}>
             <View style={styles.videotimelinesContainer}>
-                <VideoFocusedFeed/>
                 <VideowAudioFeed />
+                <VideoFocusedFeed/>
             </View>
-            <View style={styles.fixedHeightView}/>
         </View>
     );
 };
@@ -25,12 +24,8 @@ const styles = StyleSheet.create({
     videotimelinesContainer: {
         marginTop: 50,
         flex: 1,
-        flexDirection: 'column',
-    },
-    fixedHeightView: {
-        height: 50,
-        backgroundColor: 'blue',
-    },
+        flexDirection: 'column-reverse',
+    }
 });
 
 export default VideosScreen;
