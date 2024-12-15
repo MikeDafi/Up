@@ -2,6 +2,7 @@ import React, {useContext} from 'react';
 import {Dimensions, FlatList, TouchableOpacity, View} from 'react-native';
 import {Video} from 'expo-av';
 import {VideoContext} from './VideoProvider';
+import {COMPRESSED_S3_BUCKET} from "../atoms/constants";
 
 const VideoSlide = () => {
     const {
@@ -10,11 +11,11 @@ const VideoSlide = () => {
         providerHandlePausePress,
         providerHandlePlaybackStatusUpdate,
         currentVideoIndex,
-        video_paths,
+        videoIds,
+        videoIdtoRef,
         videoSlideFlatListRef,
         viewabilityConfig,
         onViewableItemsChanged,
-        videoRefs
     } = useContext(VideoContext);
 
 
@@ -22,7 +23,7 @@ const VideoSlide = () => {
         <View>
             <FlatList
                 ref={videoSlideFlatListRef}
-                data={video_paths}
+                data={videoIds}
                 horizontal
                 pagingEnabled
                 viewabilityConfig={viewabilityConfig.current}
@@ -30,8 +31,9 @@ const VideoSlide = () => {
                 showsHorizontalScrollIndicator={false}
                 renderItem={({item, index}) => (<TouchableOpacity onPress={providerHandlePausePress} style={{flex: 1}}>
                     <Video
-                        ref={ref => videoRefs.current[index] = ref}
-                        source={item}
+                        // convert item to {uri: item} for remote videos
+                        ref={(ref) => videoIdtoRef.current[item] = ref}
+                        source={{uri: `${COMPRESSED_S3_BUCKET}/${item}`}}
                         style={{width: Dimensions.get('window').width, height: '100%'}}
                         resizeMode={Video.RESIZE_MODE_COVER}
                         isMuted={isMuted}

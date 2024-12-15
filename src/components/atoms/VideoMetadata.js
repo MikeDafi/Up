@@ -1,28 +1,28 @@
-class VideoMetadata {
+export class VideoMetadata {
   constructor({
-    title, description, hashtags, muteByDefault, filePath, uploadedAt, duration, geoLocation,
+    videoId, description, hashtags, muteByDefault, uploadedAt, geoLocation,
   }) {
-    this.title = title;                      // Title of the video
+    this.videoId = videoId;                  // Unique identifier
     this.description = description;          // Short description
     this.hashtags = hashtags;                // Array of hashtags
     this.muteByDefault = muteByDefault;      // Whether video is muted by default
-    this.filePath = filePath;                // Path in S3 bucket
     this.uploadedAt = uploadedAt;            // Timestamp of upload
-    this.geoLocation = geoLocation;          // Geolocation of the video
-    this.duration = duration;                // Duration of the video
+    this.city = geoLocation.city;            // City of upload
+    this.region = geoLocation.region;        // Region of upload
+    this.country = geoLocation.country;      // Country of
   }
 
   // Converts metadata to JSON format
   toJSON() {
     return {
-      title: this.title,
+      videoId: this.videoId,
       description: this.description,
       hashtags: this.hashtags,
       muteByDefault: this.muteByDefault,
-      filePath: this.filePath,
       uploadedAt: this.uploadedAt,
-      geoLocation: this.geoLocation,
-      duration: this.duration,
+      city: this.city,
+      region: this.region,
+      country: this.country,
     };
   }
 }

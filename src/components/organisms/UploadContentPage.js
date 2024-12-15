@@ -1,69 +1,16 @@
-import React, { useState } from 'react';
+import React, {useState} from 'react';
 import {
-  Button,
-  Keyboard,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
-  ActivityIndicator,
+  Button, Keyboard, StyleSheet, Switch, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Video } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import {Video} from 'expo-av';
 import Modal from 'react-native-modal';
-import { Buffer } from 'buffer';
-import { S3_API_URL, VIDEO_METADATA_API_URL } from '../atoms/constants';
-import { VideoMetadata } from '../atoms/VideoMetadata';
-import { fetchGeoLocation } from '../atoms/utilities';
-
-const getPresignedUrl = async (fileName, contentType) => {
-  const response = await fetch(`${S3_API_URL}/getPresignedUrl?fileName=${fileName}&contentType=${contentType}`);
-  const data = await response.json();
-  return data.url;
-};
-
-const uploadVideo = async (file, presignedUrl) => {
-  try {
-    const fileContent = await FileSystem.readAsStringAsync(file.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    const binaryData = Buffer.from(fileContent, 'base64');
-    const response = await fetch(presignedUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': file.type,
-      },
-      body: binaryData,
-    });
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to upload video: ${error}`);
-    }
-    return true;
-  } catch (error) {
-    console.error('Error uploading video:', error);
-    return false;
-  }
-};
-
-const createVideoMetadata = async (metadata) => {
-  const response = await fetch(VIDEO_METADATA_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(metadata.toJSON()), // Use the toJSON method of VideoMetadata
-  });
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to save metadata: ${error}`);
-  }
-  return response.ok;
-};
+import * as Progress from 'react-native-progress';
+import {VideoMetadata} from '../atoms/VideoMetadata';
+import {createVideoMetadata} from '../atoms/dynamodb';
+import {getPresignedUrl, uploadVideo} from '../atoms/s3';
+import {fetchGeoLocation} from '../atoms/location';
+import {backoff} from "../atoms/utilities";
 
 const UploadContentPage = () => {
   const [media, setMedia] = useState(null);
@@ -73,6 +20,7 @@ const UploadContentPage = () => {
   const [hashtagInput, setHashtagInput] = useState('');
   const [muteByDefault, setMuteByDefault] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [progress, setProgress] = useState(0); // Progress state
   const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
 
   const validateFile = (file) => {
@@ -88,7 +36,7 @@ const UploadContentPage = () => {
   };
 
   const getAccess = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const {status} = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       alert('Permission Denied: Camera roll access is required.');
       return false;
@@ -114,19 +62,20 @@ const UploadContentPage = () => {
   };
 
   const pickMedia = async () => {
-    if (!await getAccess()) return;
+    if (!await getAccess()) {
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 1,
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos, allowsEditing: true, aspect: [1, 1], quality: 1,
     });
     if (result.canceled) {
       console.log('User cancelled video selection.');
       return;
     }
     const selectedFile = result.assets[0];
-    if (!validateFile(selectedFile)) return;
+    if (!validateFile(selectedFile)) {
+      return;
+    }
 
     setMedia(selectedFile.uri);
     setMediaType(selectedFile.type);
@@ -139,13 +88,8 @@ const UploadContentPage = () => {
     setHashtags([]);
     setHashtagInput('');
     setMuteByDefault(false);
+    setProgress(0); // Reset progress
   };
-
-  const getVideoDuration = async (uri) => {
-    const video = new Video();
-    await video.loadAsync({ uri }, { shouldPlay: false });
-    return video.getDurationMillis();
-  }
 
   const submitMedia = async () => {
     if (!media) {
@@ -153,38 +97,48 @@ const UploadContentPage = () => {
       return;
     }
     setIsSubmitting(true);
+    setProgress(0.1); // Start progress
     try {
       const fileName = media.split('/').pop();
-      const videoDuration = await getVideoDuration(media);
       const contentType = 'video/mp4';
-      const presignedUrl = await getPresignedUrl(fileName, contentType);
-      const isUploaded = await uploadVideo({ uri: media, type: contentType }, presignedUrl);
-      if (!isUploaded) throw new Error('Video upload failed.');
+      const presignedUrl = await backoff(getPresignedUrl, maxRetries = 3, initialDelay = 1000,
+          timeout = 10000)(fileName, contentType);
 
+      // Upload video to S3
+      const isUploaded = await backoff(
+          await uploadVideo({uri: media, type: contentType}, presignedUrl, (progressEvent) => {
+            const percentage = progressEvent.loaded / progressEvent.total;
+            setProgress(percentage * 0.7); // Update progress (up to 70% for S3 upload)
+          }), maxRetries = 3, initialDelay = 1000, timeout = 30000);
+      if (!isUploaded) {
+        throw new Error('Video upload failed.');
+      }
+      setProgress(0.8); // After S3 upload, progress to 80%
+
+      // Generate metadata and save to DynamoDB
       const geoLocation = await fetchGeoLocation();
       const metadata = new VideoMetadata({
-        title: fileName,
+        videoId: presignedUrl.split('?')[0].split('/').pop(),
         description,
         hashtags,
         muteByDefault,
-        videoId: presignedUrl.split('?')[0].split("/").pop(),
-        duration: videoDuration,
         uploadedAt: new Date().toISOString(),
         geoLocation,
       });
 
-      await createVideoMetadata(metadata);
-      setIsSubmitting(false);
+      await backoff(createVideoMetadata, maxRetries = 3, initialDelay = 1000, timeout = 15000)(metadata);
+      setProgress(1.0); // Completion
       setIsSuccessModalVisible(true);
+      await new Promise((r) => setTimeout(r, 1000));
       resetState();
     } catch (error) {
-      setIsSubmitting(false);
       console.error('Error submitting media:', error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  return (
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+  return (<TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View style={styles.container}>
           <TextInput
               style={styles.input}
@@ -199,29 +153,23 @@ const UploadContentPage = () => {
                 value={hashtagInput}
                 onChangeText={(text) => setHashtagInput(text.slice(0, 15))}
             />
-            <Button title="Add" onPress={addHashtag} />
+            <Button title="Add" onPress={addHashtag}/>
           </View>
           <View style={styles.hashtagContainer}>
-            {hashtags.map((tag, index) => (
-                <View key={index} style={styles.hashtagBox}>
+            {hashtags.map((tag, index) => (<View key={index} style={styles.hashtagBox}>
                   <Text style={styles.hashtagText}>#{tag}</Text>
                   <TouchableOpacity onPress={() => removeHashtag(index)}>
                     <Text style={styles.removeButton}>x</Text>
                   </TouchableOpacity>
-                </View>
-            ))}
+                </View>))}
           </View>
           <View style={styles.switchContainer}>
             <Text style={styles.switchLabel}>Mute by Default:</Text>
-            <Switch
-                value={muteByDefault}
-                onValueChange={setMuteByDefault}
-            />
+            <Switch value={muteByDefault} onValueChange={setMuteByDefault}/>
           </View>
-          <Button title="Pick a Video" onPress={pickMedia} />
-          {media && (
-              <Video
-                  source={{ uri: media }}
+          <Button title="Pick a Video" onPress={pickMedia}/>
+          {media && (<Video
+                  source={{uri: media}}
                   rate={1.0}
                   volume={1.0}
                   isMuted={muteByDefault}
@@ -229,24 +177,33 @@ const UploadContentPage = () => {
                   shouldPlay
                   useNativeControls
                   style={styles.video}
-              />
-          )}
-          <Button title="Submit" onPress={submitMedia} />
-          <Modal isVisible={isSubmitting}>
+              />)}
+          <Button title="Submit" onPress={submitMedia}/>
+          <Modal
+              isVisible={isSubmitting}
+              style={styles.progressModal} // Adjust modal to avoid tab bar overlap
+          >
             <View style={styles.modal}>
-              <ActivityIndicator size="large" color="#0000ff" />
-              <Text style={styles.modalText}>Uploading...</Text>
+              <Progress.Bar
+                  progress={progress}
+                  width={200}
+                  color="#4caf50"
+                  borderColor="#ccc"
+                  unfilledColor="#f1f1f1"
+              />
+              <Text style={styles.modalText}>
+                {progress < 1 ? 'Uploading...' : 'Upload Complete'}
+              </Text>
             </View>
           </Modal>
           <Modal isVisible={isSuccessModalVisible} onBackdropPress={() => setIsSuccessModalVisible(false)}>
             <View style={styles.modal}>
               <Text style={styles.modalText}>🎉 Video Uploaded Successfully! 🎉</Text>
-              <Button title="Close" onPress={() => setIsSuccessModalVisible(false)} />
+              <Button title="Close" onPress={() => setIsSuccessModalVisible(false)}/>
             </View>
           </Modal>
         </View>
-      </TouchableWithoutFeedback>
-  );
+      </TouchableWithoutFeedback>);
 };
 
 const styles = StyleSheet.create({
@@ -256,8 +213,6 @@ const styles = StyleSheet.create({
     width: 300, height: 300, marginVertical: 20,
   }, input: {
     borderWidth: 1, borderColor: '#ccc', borderRadius: 5, padding: 10, marginVertical: 10, width: '90%',
-  }, charLimit: {
-    alignSelf: 'flex-start', marginBottom: 10, color: '#666',
   }, hashtagInputContainer: {
     flexDirection: 'row', alignItems: 'center', marginVertical: 10, width: '90%',
   }, hashtagInput: {
@@ -282,8 +237,11 @@ const styles = StyleSheet.create({
     fontSize: 16, marginRight: 10,
   }, modal: {
     backgroundColor: 'white', padding: 20, borderRadius: 10, alignItems: 'center',
+  }, progressModal: {
+    justifyContent: 'flex-end', // Ensures the modal doesn't overlap with the tab bar
+    margin: 0, // Removes modal margins
   }, modalText: {
-    fontSize: 18, fontWeight: 'bold', marginBottom: 20,
+    fontSize: 18, fontWeight: 'bold', marginTop: 20,
   },
 });
 

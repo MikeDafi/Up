@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.1",
+    "@react-native-async-storage/async-storage": "^2.1.0",
     "@react-navigation/bottom-tabs": "^6.6.1",
     "@react-navigation/native": "^6.1.18",
     "babel-plugin-module-resolver": "^5.0.2",
@@ -23,9 +24,11 @@
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-native": "0.74.3",
+    "react-native-async-storage": "^0.0.1",
     "react-native-dotenv": "^3.4.11",
     "react-native-elements": "^3.4.3",
     "react-native-modal": "^13.0.1",
+    "react-native-progress": "^5.0.1",
     "react-native-vector-icons": "^10.1.0",
     "react-native-video": "^6.4.3"
   },
