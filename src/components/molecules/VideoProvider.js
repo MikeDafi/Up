@@ -31,7 +31,6 @@ const VideoProvider = ({children, video_feed_type}) => {
   const videoIdtoRef = useRef({});
   const [videoIndexIdealState, setVideoIndexIdealState] = useState(0);
   const [videoIndexExternalView, setVideoIndexExternalView] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [checkedCache, setCheckedCache] = useState(false);
   const [error, setError] = useState(null);
 

@@ -14,7 +14,6 @@ import {backoff} from "../atoms/utilities";
 
 const UploadContentPage = () => {
   const [media, setMedia] = useState(null);
-  const [mediaType, setMediaType] = useState(null);
   const [description, setDescription] = useState('');
   const [hashtags, setHashtags] = useState([]);
   const [hashtagInput, setHashtagInput] = useState('');
@@ -25,11 +24,11 @@ const UploadContentPage = () => {
 
   const validateFile = (file) => {
     if (file.type !== 'video') {
-      alert('Invalid file: Please select a video file.');
+      window.alert('Invalid file: Please select a video file.');
       return false;
     }
     if (file.fileSize > 50000000) {
-      alert('Invalid file: Please select a video smaller than 50MB.');
+      window.alert('Invalid file: Please select a video smaller than 50MB.');
       return false;
     }
     return true;
@@ -38,7 +37,7 @@ const UploadContentPage = () => {
   const getAccess = async () => {
     const {status} = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      alert('Permission Denied: Camera roll access is required.');
+      window.alert('Permission Denied: Camera roll access is required.');
       return false;
     }
     return true;
@@ -46,14 +45,14 @@ const UploadContentPage = () => {
 
   const addHashtag = () => {
     if (hashtags.length >= 10) {
-      alert('Limit Reached: You can only add up to 10 hashtags.');
+      window.alert('Limit Reached: You can only add up to 10 hashtags.');
       return;
     }
     if (hashtagInput.trim() && hashtagInput.length <= 15 && !hashtags.includes(hashtagInput)) {
       setHashtags([...hashtags, hashtagInput]);
       setHashtagInput('');
     } else if (hashtagInput.length > 15) {
-      alert('Too Long: Hashtags cannot exceed 15 characters.');
+      window.alert('Too Long: Hashtags cannot exceed 15 characters.');
     }
   };
 
@@ -78,12 +77,10 @@ const UploadContentPage = () => {
     }
 
     setMedia(selectedFile.uri);
-    setMediaType(selectedFile.type);
   };
 
   const resetState = () => {
     setMedia(null);
-    setMediaType(null);
     setDescription('');
     setHashtags([]);
     setHashtagInput('');
@@ -93,7 +90,7 @@ const UploadContentPage = () => {
 
   const submitMedia = async () => {
     if (!media) {
-      alert('No Video Selected: Please select a video to upload.');
+      window.alert('No Video Selected: Please select a video to upload.');
       return;
     }
     setIsSubmitting(true);
@@ -101,15 +98,14 @@ const UploadContentPage = () => {
     try {
       const fileName = media.split('/').pop();
       const contentType = 'video/mp4';
-      const presignedUrl = await backoff(getPresignedUrl, maxRetries = 3, initialDelay = 1000,
-          timeout = 10000)(fileName, contentType);
+      const presignedUrl = await backoff(getPresignedUrl, 3, 1000, 10000)(fileName, contentType);
 
       // Upload video to S3
       const isUploaded = await backoff(
           await uploadVideo({uri: media, type: contentType}, presignedUrl, (progressEvent) => {
             const percentage = progressEvent.loaded / progressEvent.total;
             setProgress(percentage * 0.7); // Update progress (up to 70% for S3 upload)
-          }), maxRetries = 3, initialDelay = 1000, timeout = 30000);
+          }), 3, 1000, 30000);
       if (!isUploaded) {
         throw new Error('Video upload failed.');
       }
@@ -126,7 +122,7 @@ const UploadContentPage = () => {
         geoLocation,
       });
 
-      await backoff(createVideoMetadata, maxRetries = 3, initialDelay = 1000, timeout = 15000)(metadata);
+      await backoff(createVideoMetadata, 3, 1000, 15000)(metadata);
       setProgress(1.0); // Completion
       setIsSuccessModalVisible(true);
       await new Promise((r) => setTimeout(r, 1000));
