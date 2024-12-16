@@ -28,8 +28,8 @@ const UploadContentPage = () => {
       alert('Invalid file: Please select a video file.');
       return false;
     }
-    if (file.fileSize > 10000000) {
-      alert('Invalid file: Please select a video smaller than 10MB.');
+    if (file.fileSize > 50000000) {
+      alert('Invalid file: Please select a video smaller than 50MB.');
       return false;
     }
     return true;

@@ -19,4 +19,8 @@ export const CURRENT_VIDEO_INDEX_KEY = 'current_video_index';
 
 export const CURRENT_VIDEO_PATHS_KEY = 'current_video_paths';
 
-export const SEEN_VIDEOS_FETCH_FEED_THRESHOLD_PERCENTAGE = 0.7
+export const SEEN_VIDEOS_FETCH_FEED_THRESHOLD_PERCENTAGE = 0.6;
+
+export const NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE = 4;
+
+export const NUM_VIDEOS_TO_REQUEST = 5;
