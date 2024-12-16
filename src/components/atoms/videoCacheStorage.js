@@ -19,24 +19,23 @@ return fallback;
 }
 };
 
-export const updateSeenVideoIds = async (video_feed_type, newIds) => {
+export const updateSeenVideoIdsCache = async (video_feed_type, newIds) => {
     const currentIds = (await retrieveCachedData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, [])) || [];
-const updatedIds = Array.from(new Set([...currentIds, ...newIds])).slice(-SEEN_VIDEO_IDS_LIMIT); // Keep the last SEEN_VIDEO_IDS_LIMIT ids
-await cacheData(SEEN_VIDEO_IDS_KEY, updatedIds);
-return updatedIds;
+    const updatedIds = Array.from(new Set([...currentIds, ...newIds])).slice(-SEEN_VIDEO_IDS_LIMIT); // Keep the last SEEN_VIDEO_IDS_LIMIT ids
+    await cacheData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, updatedIds);
 };
 
 export const getSeenVideoIdsCache = async (video_feed_type) =>
     retrieveCachedData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, []);
 
-export const getCurrentVideoIndexCache = async (video_feed_type) =>
+export const getVideoIndexIdealStateCache = async (video_feed_type) =>
     retrieveCachedData(`${video_feed_type}/${CURRENT_VIDEO_INDEX_KEY}`, 0);
 
-export const setCurrentVideoIndexCache = async (video_feed_type, index) =>
+export const setVideoIndexIdealStateCache = async (video_feed_type, index) =>
     cacheData(`${video_feed_type}/${CURRENT_VIDEO_INDEX_KEY}`, index);
 
 export const getCurrentVideoIdsCache = async (video_feed_type) =>
     retrieveCachedData(`${video_feed_type}/${CURRENT_VIDEO_PATHS_KEY}`, []);
 
-export const setCurrentVideoIdsCache = async (video_feed_type, videoIds) =>
+export const setVideoIdsCache = async (video_feed_type, videoIds) =>
     cacheData(`${video_feed_type}/${CURRENT_VIDEO_PATHS_KEY}`, videoIds);

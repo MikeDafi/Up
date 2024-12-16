@@ -1,16 +1,19 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Text} from 'react-native';
 import PropTypes from 'prop-types';
-import {SEEN_VIDEOS_FETCH_FEED_THRESHOLD_PERCENTAGE, VideoFeedType} from '../atoms/constants';
+import {
+  NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE, NUM_VIDEOS_TO_REQUEST,
+  VideoFeedType
+} from '../atoms/constants';
 import {fetchFeed} from '../atoms/dynamodb';
 import {backoff} from '../atoms/utilities';
 import {
-  getCurrentVideoIndexCache,
+  getVideoIndexIdealStateCache,
   getCurrentVideoIdsCache,
   getSeenVideoIdsCache,
-  setCurrentVideoIndexCache,
-  setCurrentVideoIdsCache,
-  updateSeenVideoIds
+  setVideoIndexIdealStateCache,
+  setVideoIdsCache,
+  updateSeenVideoIdsCache
 } from '../atoms/videoCacheStorage';
 
 export const VideoContext = React.createContext();
@@ -26,75 +29,91 @@ const VideoProvider = ({children, video_feed_type}) => {
   const videoSlideFlatListRef = useRef(null);
   const [videoIds, setVideoIds] = useState([]);
   const videoIdtoRef = useRef({});
-  const [currentVideoIndex, setCurrentVideoIndexState] = useState(0);
+  const [videoIndexIdealState, setVideoIndexIdealState] = useState(0);
+  const [videoIndexExternalView, setVideoIndexExternalView] = useState(0);
   const [loading, setLoading] = useState(false);
   const [checkedCache, setCheckedCache] = useState(false);
   const [error, setError] = useState(null);
 
   // Initialize data from storage
-  const checkVideoCache = useCallback(async () => {
+  const checkVideoCache = async () => {
 
     if (checkedCache) {
       return;
     }
-    const cachedIndex = await getCurrentVideoIndexCache(video_feed_type);
-    await setCurrentVideoIndexState(cachedIndex);
     const cachedCurrentVideoIds = await getCurrentVideoIdsCache(video_feed_type);
+    const cachedIndex = await getVideoIndexIdealStateCache(video_feed_type);
+    console.log("cachedIndex", cachedIndex, "cachedCurrentVideoIds", cachedCurrentVideoIds.length);
+    const startingVideoIndexIdealState = cachedIndex + 1;
     if (cachedCurrentVideoIds) {
-      await setVideoIds(cachedCurrentVideoIds);
+      const shrunkenVideoIds = cachedCurrentVideoIds.slice(startingVideoIndexIdealState, cachedCurrentVideoIds.length);
+      console.log("length", shrunkenVideoIds.length);
+      await setVideoIds(shrunkenVideoIds);
+      setVideoIndexIdealStateCache(video_feed_type, startingVideoIndexIdealState);
+      setVideoIdsCache(video_feed_type, shrunkenVideoIds);
+
+      if (shrunkenVideoIds.length < NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE) {
+        await fetchNewVideosOnEndReached();
+      }
     }
-    setCheckedCache(true);
-  }, []);
+    await setCheckedCache(true);
+  }
+
 
   // Fetch new videos, avoiding previously seen IDs
-  const fetchNewVideos = useCallback(async () => {
-    // Fetch new videos only if we have seen a certain percentage of the videos
-    console.log('currentVideoIndex:', currentVideoIndex, 'videoIds.length:', videoIds.length, VideoFeedType.VIDEO_FOCUSED_FEED);
-    if (!checkedCache || (currentVideoIndex < videoIds.length * SEEN_VIDEOS_FETCH_FEED_THRESHOLD_PERCENTAGE)) {
-      return;
-    }
+  const fetchNewVideosOnEndReached = async () => {
+    console.log("fetchNewVideosOnEndReached", !checkedCache, videoIndexExternalView, videoIds.length, NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE);
 
-    setLoading(true);
     setError(null);
 
     try {
       const seenVideoIds = await getSeenVideoIdsCache(video_feed_type);
+      console.log("seenVideoIds", seenVideoIds);
       const videoIdBatch = await backoff(fetchFeed, 3, 1000, 10000)({
-        video_feed_type: VideoFeedType.VIDEO_FOCUSED_FEED, exclude_ids: seenVideoIds,
+        video_feed_type: video_feed_type,
+        exclude_video_ids: seenVideoIds,
+        limit: NUM_VIDEOS_TO_REQUEST,
       });
-      // keep 10 before the current video index and append the videoIdBatch
-      const numVideosToRemove = Math.max(0, currentVideoIndex - 10);
-      const oldNewVideoIds = [...videoIds.slice(numVideosToRemove), ...videoIdBatch];
-      setVideoIds(oldNewVideoIds);
-      // Update the current video index to the new index
-      const newIndex = currentVideoIndex - numVideosToRemove;
-      // Update the cache
-      console.log("newIndex:", newIndex);
-      await setCurrentVideoIdsCache(video_feed_type, oldNewVideoIds);
-      // await setCurrentVideoIndex(newIndex);
-      await updateSeenVideoIds(video_feed_type, videoIdBatch);
+
+      // Remove older videos to keep the list manageable
+      const updatedVideoIds = [...videoIds, ...videoIdBatch];
+      console.log("updatedVideoIds", updatedVideoIds);
+      // Update state
+      await setVideoIds(updatedVideoIds);
+
+      await triggerVideoIndex(videoIndexExternalView, true, "fetchNewVideosOnEndReached");
+
+      // Update cache
+      await setVideoIdsCache(video_feed_type, updatedVideoIds);
+      await updateSeenVideoIdsCache(video_feed_type, videoIdBatch);
     } catch (err) {
       console.error('Error fetching videos:', err);
       setError('Failed to load videos. Please try again later.');
-    } finally {
-      setLoading(false);
     }
-  }, [checkedCache, currentVideoIndex]);
-
-  // Set the current index
-  const setCurrentVideoIndex = async (index) => {
-    setCurrentVideoIndexState(index);
-    await setCurrentVideoIndexCache(video_feed_type, index);
   };
 
+  // Set the current index
+  const triggerVideoIndex = async (index, scrollList = true, caller = "none", animated = false) => {
+    // Check if the list is empty
+    console.log("Caller: ", caller, "index", index, videoIds.length, !videoIds)
+    setVideoIndexIdealState(index);
+    if (scrollList){
+      console.log("caller", caller, "scrollList", scrollList, "index", index, "animated", animated);
+      // Assuming there is a list for scrollList to be called
+      while (!videoSlideFlatListRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      videoSlideFlatListRef.current?.scrollToIndex({index: index, animated: animated});
+    }
+    await setVideoIndexIdealStateCache(video_feed_type, index);
+  };
   // Initialize data and load videos
   useEffect(() => {
     const init = async () => {
       await checkVideoCache();
-      await fetchNewVideos();
     };
     init();
-  }, [checkVideoCache, fetchNewVideos]);
+  }, []);
   const providerHandleMutedPress = () => {
     setMuted((prev) => !prev);
   };
@@ -103,13 +122,10 @@ const VideoProvider = ({children, video_feed_type}) => {
     setLiked((prev) => !prev);
   };
 
-  const providerHandleBackArrowPress = () => {
-    if (currentVideoIndex > 0) {
-      const previousVideoIndex = currentVideoIndex - 1;
-      setCurrentVideoIndex(previousVideoIndex);
-      if (videoSlideFlatListRef.current) {
-        videoSlideFlatListRef.current.scrollToIndex({index: previousVideoIndex, animated: true});
-      }
+  const providerHandleBackArrowPress = async () => {
+    if (videoIndexExternalView > 0) {
+      const previousVideoIndex = videoIndexExternalView - 1;
+      await triggerVideoIndex(previousVideoIndex, true, 'providerHandleBackArrowPress', true);
     }
   };
 
@@ -118,10 +134,10 @@ const VideoProvider = ({children, video_feed_type}) => {
   });
 
   const onViewableItemsChanged = useCallback(async ({viewableItems}) => {
-    await fetchNewVideos();
     if (viewableItems.length > 0) {
-      console.log("onViewableItemsChanged viewableItems:", viewableItems);
-      setCurrentVideoIndex(viewableItems[0].index);
+      console.debug("onViewableItemsChanged viewableItems:", viewableItems);
+      setVideoIndexExternalView(viewableItems[0].index);
+      setVideoIndexIdealStateCache(video_feed_type, viewableItems[0].index);
       setMuted(video_feed_type !== VideoFeedType.VIDEO_FOCUSED_FEED);
       setPaused(false);
     }
@@ -131,32 +147,20 @@ const VideoProvider = ({children, video_feed_type}) => {
     setPaused((prev) => !prev);
   };
 
-  const providerHandlePlaybackStatusUpdate = useCallback(async ({didJustFinish}) => {
-    if (didJustFinish && currentVideoIndex < videoIds.length - 1) {
-      const previousVideoId = videoIds[currentVideoIndex];
-
-      // Reset the previous video to the start position
-      if (videoIdtoRef.current[previousVideoId]) {
-        try {
-          await videoIdtoRef.current[previousVideoId].setPositionAsync(0); // Reset video to 0
-        } catch (error) {
-          console.error(`Error resetting video ${previousVideoId}:`, error);
-        }
-      }
-
-      videoIdtoRef.current[previousVideoId]?.setPositionAsync(0);
-      const nextIndex = currentVideoIndex + 1;
-
-      videoSlideFlatListRef.current?.scrollToIndex({index: nextIndex, animated: true});
+  const providerHandlePlaybackStatusUpdate = useCallback(async ({ didJustFinish }) => {
+    if (didJustFinish && videoIndexExternalView < videoIds.length - 1) {
+      const nextIndex = videoIndexExternalView + 1;
+      // Update the current video index
+      await triggerVideoIndex(nextIndex, true, "providerHandlePlaybackStatusUpdate");
     }
   }, []);
 
   if (loading) {
-    return <Text>Loading videos...</Text>;
+    return <Text style={{ color: 'red' }}>Loading videos...</Text>;
   }
 
   if (error) {
-    return <Text>{error}</Text>;
+    return <Text style={{ color: 'red' }}>{error}</Text>;
   }
 
   return (<VideoContext.Provider value={{
@@ -170,14 +174,14 @@ const VideoProvider = ({children, video_feed_type}) => {
         providerHandlePausePress,
 
         // VideoSlide information
-        currentVideoIndex,
-        setCurrentVideoIndex,
+        videoIndexExternalView,
         videoIds,
         videoIdtoRef,
         providerHandlePlaybackStatusUpdate,
         videoSlideFlatListRef,
         viewabilityConfig,
         onViewableItemsChanged,
+        fetchNewVideosOnEndReached
       }}>
         {children}
       </VideoContext.Provider>);
