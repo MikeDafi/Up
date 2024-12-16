@@ -1,5 +1,5 @@
 import React, {useContext} from 'react';
-import {Dimensions, FlatList, TouchableOpacity, View, Text} from 'react-native';
+import {Dimensions, FlatList, TouchableOpacity, View} from 'react-native';
 import {Video} from 'expo-av';
 import {VideoContext} from './VideoProvider';
 import {COMPRESSED_S3_BUCKET, NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE} from "../atoms/constants";
