@@ -3,7 +3,9 @@ import {StyleSheet, View} from 'react-native';
 import VideoSlide from './VideoSlide';
 import VideoProvider from './VideoProvider';
 import VideoSlideController from './VideoSlideController';
+import VideoDescriptionSlide from './VideoDescriptionSlide';
 import PropTypes from 'prop-types';
+import VideoProgressBar from "./VideoProgressBar";
 
 const VideoWrapper = ({video_feed_type}) => {
 
@@ -11,6 +13,8 @@ const VideoWrapper = ({video_feed_type}) => {
         <View style={styles.wrapper}>
             <VideoProvider video_feed_type={video_feed_type}>
                 <VideoSlide/>
+                <VideoDescriptionSlide/>
+                <VideoProgressBar/>
                 <VideoSlideController/>
             </VideoProvider>
         </View>
