@@ -10,9 +10,9 @@ const VideoSlide = () => {
         isPaused,
         providerHandlePausePress,
         providerHandlePlaybackStatusUpdate,
-      videoIndexExternalView,
-        videoIds,
-        videoIdtoRef,
+        videoIndexExternalView,
+        videoMetadatas,
+        videoSlideVideoRefs,
         videoSlideFlatListRef,
         viewabilityConfig,
         onViewableItemsChanged,
@@ -24,10 +24,10 @@ const VideoSlide = () => {
         <View>
           <FlatList
               ref={videoSlideFlatListRef}
-              data={videoIds}
+              data={videoMetadatas}
               horizontal
               pagingEnabled
-              keyExtractor={(item, index) => `${item}-${index}`} // Stable keys to avoid re-renders
+              keyExtractor={(item, index) => `${item.videoId}-${index}`} // Stable keys to avoid re-renders
               viewabilityConfig={viewabilityConfig.current}
               onViewableItemsChanged={onViewableItemsChanged}
               onEndReached={fetchNewVideosOnEndReached} // Trigger fetch on reaching the end
@@ -42,18 +42,21 @@ const VideoSlide = () => {
               maxToRenderPerBatch={2} // Render 2 additional videos while scrolling
               windowSize={3} // Only keep 3 viewports of items rendered
               renderItem={({ item, index }) => (
-                  <TouchableOpacity onPress={providerHandlePausePress} style={{ flex: 1 }}>
-                    <Video
-                        ref={(ref) => (videoIdtoRef.current[item] = ref)}
-                        source={{ uri: `${COMPRESSED_S3_BUCKET}/${item}` }}
-                        style={{ width: Dimensions.get('window').width, height: '100%' }}
-                        resizeMode={Video.RESIZE_MODE_COVER}
-                        isMuted={isMuted}
-                        shouldPlay={!isPaused && index === videoIndexExternalView}
-                        useNativePlaybackControls
-                        onPlaybackStatusUpdate={providerHandlePlaybackStatusUpdate}
-                    />
-                  </TouchableOpacity>
+                  <View>
+                    <TouchableOpacity onPress={providerHandlePausePress} style={{ flex: 1 }}>
+                      <Video
+                          source={{ uri: `${COMPRESSED_S3_BUCKET}/${item.videoId}` }}
+                          style={{ width: Dimensions.get('window').width, height: '100%' }}
+                          ref={(ref) => (videoSlideVideoRefs.current[index] = ref)}
+                          resizeMode={Video.RESIZE_MODE_COVER}
+                          isMuted={isMuted}
+                          shouldPlay={!isPaused && index === videoIndexExternalView}
+                          useNativePlaybackControls
+                          onPlaybackStatusUpdate={providerHandlePlaybackStatusUpdate}
+                      />
+                    </TouchableOpacity>
+
+                  </View>
               )}
               style={{ paddingBottom: '28.5%', height: '130%' }}
           />

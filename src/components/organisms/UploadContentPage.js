@@ -119,7 +119,9 @@ const UploadContentPage = () => {
         hashtags,
         muteByDefault,
         uploadedAt: new Date().toISOString(),
-        geoLocation,
+        city: geoLocation.city,
+        region: geoLocation.region,
+        country: geoLocation.country
       });
 
       await backoff(createVideoMetadata, 3, 1000, 15000)(metadata);

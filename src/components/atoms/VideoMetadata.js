@@ -1,15 +1,24 @@
 export class VideoMetadata {
   constructor({
-    videoId, description, hashtags, muteByDefault, uploadedAt, geoLocation,
+    videoId = '',
+    title = '',
+    description = 'aaaaaaaaa aaaaaaaaa aaaaaaaaa aaaaaaaaa',
+    hashtags = [],
+    muteByDefault = false,
+    uploadedAt = '',
+    city = '',
+    region = '',
+    country = '',
   }) {
     this.videoId = videoId;                  // Unique identifier
+    this.title = title;                      // Title of video
     this.description = description;          // Short description
     this.hashtags = hashtags;                // Array of hashtags
     this.muteByDefault = muteByDefault;      // Whether video is muted by default
     this.uploadedAt = uploadedAt;            // Timestamp of upload
-    this.city = geoLocation.city;            // City of upload
-    this.region = geoLocation.region;        // Region of upload
-    this.country = geoLocation.country;      // Country of
+    this.city = city;                        // City of upload
+    this.region = region;                    // Region of upload
+    this.country = country;                  // Country of
   }
 
   // Converts metadata to JSON format

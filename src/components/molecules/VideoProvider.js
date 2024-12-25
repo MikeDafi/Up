@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Text} from 'react-native';
+import {Text, View} from 'react-native';
 import PropTypes from 'prop-types';
 import {
   NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE, NUM_VIDEOS_TO_REQUEST,
@@ -7,14 +7,16 @@ import {
 } from '../atoms/constants';
 import {fetchFeed} from '../atoms/dynamodb';
 import {backoff} from '../atoms/utilities';
+import { useIsFocused } from "@react-navigation/native";
 import {
   getVideoIndexIdealStateCache,
-  getCurrentVideoIdsCache,
-  getSeenVideoIdsCache,
+  getVideoMetadatasCache,
+  getSeenVideoMetadatasCache,
   setVideoIndexIdealStateCache,
-  setVideoIdsCache,
-  updateSeenVideoIdsCache
+  setVideoMetadatasCache,
+  updateSeenVideoMetadatasCache
 } from '../atoms/videoCacheStorage';
+import {VideoMetadata} from '../atoms/VideoMetadata';
 
 export const VideoContext = React.createContext();
 
@@ -23,12 +25,13 @@ const video_w_sound_feed = [require('../../../assets/test_videos/visual_feed_1.m
   {uri: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4'},];
 
 const VideoProvider = ({children, video_feed_type}) => {
+  const isFocused = useIsFocused();
   const [isMuted, setMuted] = useState(video_feed_type !== VideoFeedType.VIDEO_FOCUSED_FEED);
   const [isLiked, setLiked] = useState(false);
   const [isPaused, setPaused] = useState(false);
   const videoSlideFlatListRef = useRef(null);
-  const [videoIds, setVideoIds] = useState([]);
-  const videoIdtoRef = useRef({});
+  const videoSlideVideoRefs = useRef([]);
+  const [videoMetadatas, setVideoMetadatas] = useState([]);
   const [videoIndexIdealState, setVideoIndexIdealState] = useState(0);
   const [videoIndexExternalView, setVideoIndexExternalView] = useState(0);
   const [checkedCache, setCheckedCache] = useState(false);
@@ -40,18 +43,18 @@ const VideoProvider = ({children, video_feed_type}) => {
     if (checkedCache) {
       return;
     }
-    const cachedCurrentVideoIds = await getCurrentVideoIdsCache(video_feed_type);
+    const cachedCurrentVideoMetadatas = await getVideoMetadatasCache(video_feed_type);
+    console.log("cachedCurrentVideoMetadatas", cachedCurrentVideoMetadatas);
     const cachedIndex = await getVideoIndexIdealStateCache(video_feed_type);
-    console.log("cachedIndex", cachedIndex, "cachedCurrentVideoIds", cachedCurrentVideoIds.length);
     const startingVideoIndexIdealState = cachedIndex + 1;
-    if (cachedCurrentVideoIds) {
-      const shrunkenVideoIds = cachedCurrentVideoIds.slice(startingVideoIndexIdealState, cachedCurrentVideoIds.length);
-      console.log("length", shrunkenVideoIds.length);
-      await setVideoIds(shrunkenVideoIds);
+    if (cachedCurrentVideoMetadatas) {
+      const shrunkenVideoMetadatas = cachedCurrentVideoMetadatas; //.slice(startingVideoIndexIdealState, cachedCurrentVideoMetadatas.length);
+      console.log("shrunkenVideoMetadatas", shrunkenVideoMetadatas);
+      setVideoMetadatas(shrunkenVideoMetadatas);
       setVideoIndexIdealStateCache(video_feed_type, startingVideoIndexIdealState);
-      setVideoIdsCache(video_feed_type, shrunkenVideoIds);
+      setVideoMetadatasCache(video_feed_type, shrunkenVideoMetadatas);
 
-      if (shrunkenVideoIds.length < NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE) {
+      if (shrunkenVideoMetadatas.length < NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE) {
         await fetchNewVideosOnEndReached();
       }
     }
@@ -61,30 +64,32 @@ const VideoProvider = ({children, video_feed_type}) => {
 
   // Fetch new videos, avoiding previously seen IDs
   const fetchNewVideosOnEndReached = async () => {
-    console.log("fetchNewVideosOnEndReached", !checkedCache, videoIndexExternalView, videoIds.length, NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE);
+    console.log("fetchNewVideosOnEndReached", !checkedCache, videoIndexExternalView, videoMetadatas.length, NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE);
 
     setError(null);
 
     try {
-      const seenVideoIds = await getSeenVideoIdsCache(video_feed_type);
-      console.log("seenVideoIds", seenVideoIds);
-      const videoIdBatch = await backoff(fetchFeed, 3, 1000, 10000)({
+      const seenVideoMetadatas = await getSeenVideoMetadatasCache(video_feed_type);
+      const seenVideoIds = seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId);
+      const videoRawMetadataBatch = await backoff(fetchFeed, 3, 1000, 10000)({
         video_feed_type: video_feed_type,
-        exclude_video_ids: seenVideoIds,
+        // exclude_video_ids: seenVideoIds,
         limit: NUM_VIDEOS_TO_REQUEST,
       });
+      const videoMetadataBatch = videoRawMetadataBatch.map(videoRawMetadata => new VideoMetadata(videoRawMetadata));
+
 
       // Remove older videos to keep the list manageable
-      const updatedVideoIds = [...videoIds, ...videoIdBatch];
-      console.log("updatedVideoIds", updatedVideoIds);
+      const updatedVideoMetadatas = [...videoMetadatas, ...videoMetadataBatch];
+      console.log("updatedVideoMetadatas", updatedVideoMetadatas);
       // Update state
-      await setVideoIds(updatedVideoIds);
+      await setVideoMetadatas(updatedVideoMetadatas);
 
       await triggerVideoIndex(videoIndexExternalView, true, "fetchNewVideosOnEndReached");
 
       // Update cache
-      await setVideoIdsCache(video_feed_type, updatedVideoIds);
-      await updateSeenVideoIdsCache(video_feed_type, videoIdBatch);
+      await setVideoMetadatasCache(video_feed_type, updatedVideoMetadatas);
+      await updateSeenVideoMetadatasCache(video_feed_type, videoMetadataBatch);
     } catch (err) {
       console.error('Error fetching videos:', err);
       setError('Failed to load videos. Please try again later.');
@@ -94,9 +99,14 @@ const VideoProvider = ({children, video_feed_type}) => {
   // Set the current index
   const triggerVideoIndex = async (index, scrollList = true, caller = "none", animated = false) => {
     // Check if the list is empty
-    console.log("Caller: ", caller, "index", index, videoIds.length, !videoIds)
+    console.log("Caller: ", caller, "index", index, videoMetadatas.length, !videoMetadatas)
+    const currentVideoSlideVideoRef = videoSlideVideoRefs.current[index];
+    if (currentVideoSlideVideoRef) {
+      await currentVideoSlideVideoRef.setPositionAsync(0);
+    }
+
     setVideoIndexIdealState(index);
-    if (scrollList){
+    if (scrollList && videoMetadatas.length){
       console.log("caller", caller, "scrollList", scrollList, "index", index, "animated", animated);
       // Assuming there is a list for scrollList to be called
       while (!videoSlideFlatListRef.current) {
@@ -108,11 +118,9 @@ const VideoProvider = ({children, video_feed_type}) => {
   };
   // Initialize data and load videos
   useEffect(() => {
-    const init = async () => {
-      await checkVideoCache();
-    };
-    init();
-  }, []);
+    checkVideoCache();
+    setPaused(!isFocused)
+  }, [isFocused]);
   const providerHandleMutedPress = () => {
     setMuted((prev) => !prev);
   };
@@ -146,20 +154,28 @@ const VideoProvider = ({children, video_feed_type}) => {
     setPaused((prev) => !prev);
   };
 
-  const providerHandlePlaybackStatusUpdate = useCallback(async ({ didJustFinish }) => {
-    if (didJustFinish && videoIndexExternalView < videoIds.length - 1) {
+  const providerHandlePlaybackStatusUpdate = async ({ didJustFinish }) => {
+    if (didJustFinish && videoIndexExternalView < videoMetadatas.length - 1) {
       const nextIndex = videoIndexExternalView + 1;
       // Update the current video index
-      await triggerVideoIndex(nextIndex, true, "providerHandlePlaybackStatusUpdate");
+      await triggerVideoIndex(nextIndex, true, "providerHandlePlaybackStatusUpdate", true);
     }
-  }, []);
-
-  if (loading) {
-    return <Text style={{ color: 'red' }}>Loading videos...</Text>;
+  }
+  //
+  if (!videoMetadatas.length) {
+    return (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <Text style={{ color: "red" }}>No videos you haven't seen before exist</Text>
+        </View>
+    );
   }
 
   if (error) {
-    return <Text style={{ color: 'red' }}>{error}</Text>;
+    return (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <Text style={{ color: 'red' }}>{error}</Text>
+        </View>
+    );
   }
 
   return (<VideoContext.Provider value={{
@@ -167,6 +183,7 @@ const VideoProvider = ({children, video_feed_type}) => {
         isMuted,
         isLiked,
         isPaused,
+        setPaused,
         providerHandleMutedPress,
         providerHandleLikePress,
         providerHandleBackArrowPress,
@@ -174,10 +191,10 @@ const VideoProvider = ({children, video_feed_type}) => {
 
         // VideoSlide information
         videoIndexExternalView,
-        videoIds,
-        videoIdtoRef,
+        videoMetadatas,
         providerHandlePlaybackStatusUpdate,
         videoSlideFlatListRef,
+        videoSlideVideoRefs,
         viewabilityConfig,
         onViewableItemsChanged,
         fetchNewVideosOnEndReached
