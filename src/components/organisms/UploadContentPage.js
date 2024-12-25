@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import {
-  Button, Keyboard, StyleSheet, Switch, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View,
+  Button, Keyboard, StyleSheet, Switch, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, Alert
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {Video} from 'expo-av';
@@ -22,13 +22,15 @@ const UploadContentPage = () => {
   const [progress, setProgress] = useState(0); // Progress state
   const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
 
+
+
   const validateFile = (file) => {
     if (file.type !== 'video') {
-      window.alert('Invalid file: Please select a video file.');
+      Alert.alert('Invalid file: Please select a video file.');
       return false;
     }
     if (file.fileSize > 50000000) {
-      window.alert('Invalid file: Please select a video smaller than 50MB.');
+      Alert.alert('Invalid file: Please select a video smaller than 50MB.');
       return false;
     }
     return true;
@@ -37,7 +39,7 @@ const UploadContentPage = () => {
   const getAccess = async () => {
     const {status} = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      window.alert('Permission Denied: Camera roll access is required.');
+      Alert.alert('Permission Denied: Camera roll access is required.');
       return false;
     }
     return true;
@@ -45,14 +47,14 @@ const UploadContentPage = () => {
 
   const addHashtag = () => {
     if (hashtags.length >= 10) {
-      window.alert('Limit Reached: You can only add up to 10 hashtags.');
+      Alert.alert('Limit Reached: You can only add up to 10 hashtags.');
       return;
     }
     if (hashtagInput.trim() && hashtagInput.length <= 15 && !hashtags.includes(hashtagInput)) {
       setHashtags([...hashtags, hashtagInput]);
       setHashtagInput('');
     } else if (hashtagInput.length > 15) {
-      window.alert('Too Long: Hashtags cannot exceed 15 characters.');
+      Alert.alert('Too Long: Hashtags cannot exceed 15 characters.');
     }
   };
 
@@ -90,7 +92,7 @@ const UploadContentPage = () => {
 
   const submitMedia = async () => {
     if (!media) {
-      window.alert('No Video Selected: Please select a video to upload.');
+      Alert.alert('No Video Selected: Please select a video to upload.');
       return;
     }
     setIsSubmitting(true);

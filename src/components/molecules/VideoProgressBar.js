@@ -14,7 +14,6 @@ const VideoProgressBar = () => {
   const [duration, setDuration] = useState(0); // Video duration
   const [isDragging, setIsDragging] = useState(false);
 
-  const intervalRef = useRef(null);
   const lastUpdateTimeRef = useRef(Date.now());
 
   // Update video progress periodically

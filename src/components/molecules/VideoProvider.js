@@ -20,10 +20,6 @@ import {VideoMetadata} from '../atoms/VideoMetadata';
 
 export const VideoContext = React.createContext();
 
-const video_w_sound_feed = [require('../../../assets/test_videos/visual_feed_1.mov'),
-  {uri: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4'},
-  {uri: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4'},];
-
 const VideoProvider = ({children, video_feed_type}) => {
   const isFocused = useIsFocused();
   const [isMuted, setMuted] = useState(video_feed_type !== VideoFeedType.VIDEO_FOCUSED_FEED);
@@ -57,6 +53,8 @@ const VideoProvider = ({children, video_feed_type}) => {
       if (shrunkenVideoMetadatas.length < NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE) {
         await fetchNewVideosOnEndReached();
       }
+    } else {
+      await fetchNewVideosOnEndReached();
     }
     await setCheckedCache(true);
   }
