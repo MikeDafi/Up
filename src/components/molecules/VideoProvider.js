@@ -101,6 +101,7 @@ const VideoProvider = ({children, video_feed_type}) => {
     // Check if the list is empty
     console.log("Caller: ", caller, "index", index, videoMetadatas.length, !videoMetadatas)
     const currentVideoSlideVideoRef = videoSlideVideoRefs.current[index];
+    console.log("currentVideoSlideVideoRef", currentVideoSlideVideoRef);
     if (currentVideoSlideVideoRef) {
       await currentVideoSlideVideoRef.setPositionAsync(0);
     }
@@ -155,10 +156,19 @@ const VideoProvider = ({children, video_feed_type}) => {
   };
 
   const providerHandlePlaybackStatusUpdate = async ({ didJustFinish }) => {
-    if (didJustFinish && videoIndexExternalView < videoMetadatas.length - 1) {
-      const nextIndex = videoIndexExternalView + 1;
-      // Update the current video index
-      await triggerVideoIndex(nextIndex, true, "providerHandlePlaybackStatusUpdate", true);
+
+    if (didJustFinish) {
+      // Reset the video (in case we are the last video or we return to this video)
+      const currentVideoSlideVideoRef = videoSlideVideoRefs.current[videoIndexExternalView];
+      if (currentVideoSlideVideoRef) {
+        await currentVideoSlideVideoRef.setPositionAsync(0);
+      }
+
+      if (videoIndexExternalView < videoMetadatas.length - 1) {
+        const nextIndex = videoIndexExternalView + 1;
+        // Update the current video index
+        await triggerVideoIndex(nextIndex, true, "providerHandlePlaybackStatusUpdate", true);
+      }
     }
   }
   //

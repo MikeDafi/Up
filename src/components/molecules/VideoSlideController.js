@@ -16,7 +16,7 @@ const VideoSlideController = () => {
             <TouchableOpacity onPress={providerHandleBackArrowPress} style={styles.iconContainer}>
                 <Image source={require('@assets/icons/back_arrow.png')} style={styles.icon}/>
             </TouchableOpacity>
-            <TouchableOpacity onPress={providerHandleMutedPress} style={styles.iconContainer}>
+            <TouchableOpacity onPress={providerHandleMutedPress} style={styles.soundContainer}>
                 <Image
                     source={isMuted ? require('@assets/icons/sound/sound_off.png') : require('@assets/icons/sound/sound_on.png')}
                     style={styles.icon}
@@ -33,10 +33,18 @@ const styles = StyleSheet.create({
         bottom: 0,
         right: 0,
         flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     iconContainer: {
         width: 50,
         height: 50,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    soundContainer: {
+        width: 35,
+        height: 35,
         justifyContent: 'center',
         alignItems: 'center',
     },

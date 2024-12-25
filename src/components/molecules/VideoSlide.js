@@ -52,6 +52,7 @@ const VideoSlide = () => {
                           isMuted={isMuted}
                           shouldPlay={!isPaused && index === videoIndexExternalView}
                           useNativePlaybackControls
+                          downloadFirst
                           onPlaybackStatusUpdate={providerHandlePlaybackStatusUpdate}
                       />
                     </TouchableOpacity>

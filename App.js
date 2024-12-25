@@ -25,7 +25,7 @@ export default function App() {
                 }}
                 />
                 <Tab.Screen
-                    name="Camera"
+                    name="Create"
                     component={CameraScreen}
                     options={{
                       headerShown: false,
