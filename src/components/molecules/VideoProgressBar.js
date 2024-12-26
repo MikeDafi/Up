@@ -57,7 +57,6 @@ const VideoProgressBar = () => {
         const CATCHUP_TIME_SECONDS = 2000; // Time to catch up to real-time
         const newProgress = progress + (videoPosition - progress) * (diff < 500 ? 1 : (elapsedTime > 100 ? 1
             / CATCHUP_TIME_SECONDS : elapsedTime / CATCHUP_TIME_SECONDS));
-        console.log("old progress", progress, "new progress", newProgress, "diff", diff, "elapsedTime", elapsedTime);
         if (newProgress >= progress) {
           setProgress(newProgress); // Update slider progress
         }

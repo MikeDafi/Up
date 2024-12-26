@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Text, View} from 'react-native';
+import {Text, View, Alert} from 'react-native';
 import PropTypes from 'prop-types';
 import {
   NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE, NUM_VIDEOS_TO_REQUEST,
@@ -40,6 +40,7 @@ const VideoProvider = ({children, video_feed_type}) => {
       return;
     }
     const cachedCurrentVideoMetadatas = await getVideoMetadatasCache(video_feed_type);
+    Alert.alert("cachedCurrentVideoMetadatas", cachedCurrentVideoMetadatas);
     console.log("cachedCurrentVideoMetadatas", cachedCurrentVideoMetadatas);
     const cachedIndex = await getVideoIndexIdealStateCache(video_feed_type);
     const startingVideoIndexIdealState = cachedIndex + 1;
@@ -67,8 +68,8 @@ const VideoProvider = ({children, video_feed_type}) => {
     setError(null);
 
     try {
-      const seenVideoMetadatas = await getSeenVideoMetadatasCache(video_feed_type);
-      const seenVideoIds = seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId);
+      // const seenVideoMetadatas = await getSeenVideoMetadatasCache(video_feed_type);
+      // const seenVideoIds = seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId);
       const videoRawMetadataBatch = await backoff(fetchFeed, 3, 1000, 10000)({
         video_feed_type: video_feed_type,
         // exclude_video_ids: seenVideoIds,
@@ -169,19 +170,19 @@ const VideoProvider = ({children, video_feed_type}) => {
       }
     }
   }
-  //
-  if (!videoMetadatas.length) {
-    return (
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ color: "red" }}>No videos you haven't seen before exist</Text>
-        </View>
-    );
-  }
 
   if (error) {
     return (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <Text style={{ color: 'red' }}>{error}</Text>
+        </View>
+    );
+  }
+
+  if (!videoMetadatas.length) {
+    return (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <Text style={{ color: "red" }}>No videos you haven't seen before exist</Text>
         </View>
     );
   }
