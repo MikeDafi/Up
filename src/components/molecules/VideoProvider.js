@@ -35,12 +35,12 @@ const VideoProvider = ({children, video_feed_type}) => {
 
   // Initialize data from storage
   const checkVideoCache = async () => {
-
+    window.alert("checkVideoCache");
     if (checkedCache) {
       return;
     }
     const cachedCurrentVideoMetadatas = await getVideoMetadatasCache(video_feed_type);
-    Alert.alert("cachedCurrentVideoMetadatas", len(cachedCurrentVideoMetadatas));
+    window.alert("cachedCurrentVideoMetadatas", len(cachedCurrentVideoMetadatas));
     console.log("cachedCurrentVideoMetadatas", cachedCurrentVideoMetadatas);
     const cachedIndex = await getVideoIndexIdealStateCache(video_feed_type);
     const startingVideoIndexIdealState = cachedIndex + 1;
