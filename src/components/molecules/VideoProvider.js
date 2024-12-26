@@ -35,18 +35,14 @@ const VideoProvider = ({children, video_feed_type}) => {
 
   // Initialize data from storage
   const checkVideoCache = async () => {
-    window.alert("checkVideoCache");
     if (checkedCache) {
       return;
     }
     const cachedCurrentVideoMetadatas = await getVideoMetadatasCache(video_feed_type);
-    window.alert("cachedCurrentVideoMetadatas", len(cachedCurrentVideoMetadatas));
-    console.log("cachedCurrentVideoMetadatas", cachedCurrentVideoMetadatas);
     const cachedIndex = await getVideoIndexIdealStateCache(video_feed_type);
     const startingVideoIndexIdealState = cachedIndex + 1;
     if (cachedCurrentVideoMetadatas) {
-      const shrunkenVideoMetadatas = cachedCurrentVideoMetadatas; //.slice(startingVideoIndexIdealState, cachedCurrentVideoMetadatas.length);
-      console.log("shrunkenVideoMetadatas", shrunkenVideoMetadatas);
+      const shrunkenVideoMetadatas = cachedCurrentVideoMetadatas.slice(startingVideoIndexIdealState, cachedCurrentVideoMetadatas.length);
       setVideoMetadatas(shrunkenVideoMetadatas);
       setVideoIndexIdealStateCache(video_feed_type, startingVideoIndexIdealState);
       setVideoMetadatasCache(video_feed_type, shrunkenVideoMetadatas);
@@ -63,16 +59,14 @@ const VideoProvider = ({children, video_feed_type}) => {
 
   // Fetch new videos, avoiding previously seen IDs
   const fetchNewVideosOnEndReached = async () => {
-    console.log("fetchNewVideosOnEndReached", !checkedCache, videoIndexExternalView, videoMetadatas.length, NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE);
-
     setError(null);
 
     try {
-      // const seenVideoMetadatas = await getSeenVideoMetadatasCache(video_feed_type);
-      // const seenVideoIds = seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId);
+      const seenVideoMetadatas = await getSeenVideoMetadatasCache(video_feed_type);
+      const seenVideoIds = seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId);
       const videoRawMetadataBatch = await backoff(fetchFeed, 3, 1000, 10000)({
         video_feed_type: video_feed_type,
-        // exclude_video_ids: seenVideoIds,
+        exclude_video_ids: seenVideoIds,
         limit: NUM_VIDEOS_TO_REQUEST,
       });
       const videoMetadataBatch = videoRawMetadataBatch.map(videoRawMetadata => new VideoMetadata(videoRawMetadata));

@@ -39,7 +39,7 @@ export const setVideoIndexIdealStateCache = async (video_feed_type, index) =>
 export const getVideoMetadatasCache = async (video_feed_type) => {
     const videoRawMetadatas = await retrieveCachedData(`${video_feed_type}/${CURRENT_VIDEO_PATHS_KEY}`, []);
     if (!Array.isArray(videoRawMetadatas)) {
-        console.error('Invalid cached video metadata:', videoRawMetadatas);
+        console.warn('Invalid cached video metadata:', videoRawMetadatas);
         return [];
     }
     return videoRawMetadatas.map((videoRawMetadata) => new VideoMetadata(videoRawMetadata));
