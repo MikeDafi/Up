@@ -11,7 +11,7 @@ import { useIsFocused } from "@react-navigation/native";
 import {
   getVideoIndexIdealStateCache,
   getVideoMetadatasCache,
-  getSeenVideoMetadatasCache,
+  // getSeenVideoMetadatasCache,
   setVideoIndexIdealStateCache,
   setVideoMetadatasCache,
   updateSeenVideoMetadatasCache
@@ -40,7 +40,7 @@ const VideoProvider = ({children, video_feed_type}) => {
       return;
     }
     const cachedCurrentVideoMetadatas = await getVideoMetadatasCache(video_feed_type);
-    Alert.alert("cachedCurrentVideoMetadatas", cachedCurrentVideoMetadatas);
+    Alert.alert("cachedCurrentVideoMetadatas", len(cachedCurrentVideoMetadatas));
     console.log("cachedCurrentVideoMetadatas", cachedCurrentVideoMetadatas);
     const cachedIndex = await getVideoIndexIdealStateCache(video_feed_type);
     const startingVideoIndexIdealState = cachedIndex + 1;
@@ -182,7 +182,7 @@ const VideoProvider = ({children, video_feed_type}) => {
   if (!videoMetadatas.length) {
     return (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ color: "red" }}>No videos you haven't seen before exist</Text>
+          <Text style={{ color: "red" }}>No videos you havent seen before exist</Text>
         </View>
     );
   }
