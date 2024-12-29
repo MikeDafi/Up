@@ -51,3 +51,20 @@ export const handleResponse = async (response, actionDescription = "Request fail
   }
   return response;
 };
+
+
+
+// Monkey patch global objects for debugging purposes
+// const originalSetTimeout = global.setTimeout;
+// global.setTimeout = (fn, delay, ...args) => {
+//   console.log(`setTimeout called: ${delay}ms`, fn, args);
+//   return originalSetTimeout(fn, delay, ...args);
+// };
+//
+// const originalFetch = global.fetch;
+// global.fetch = async (...args) => {
+//   console.log('Fetch called with args:', args);
+//   const result = await originalFetch(...args);
+//   console.log('Fetch resolved with args:', args);
+//   return result;
+// };

@@ -102,7 +102,6 @@ const VideoProgressBar = () => {
     <TouchableWithoutFeedback>
       <View style={styles.progressBarContainer}>
         <Slider
-            style={styles.slider}
             minimumValue={0}
             maximumValue={duration}
             value={progress}
@@ -119,10 +118,8 @@ const VideoProgressBar = () => {
 
 const styles = StyleSheet.create({
   progressBarContainer: {
-    position: "absolute", bottom: 99, width: width - 50, left: 0,
-  }, slider: {
-    width: "100%", height: 30,
-  },
+    position: "absolute", bottom: -18, width: width - 50, left: 0
+  }
 });
 
 export default VideoProgressBar

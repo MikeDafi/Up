@@ -21,7 +21,7 @@ return fallback;
 
 export const updateSeenVideoMetadatasCache = async (video_feed_type, newIds) => {
     const currentIds = (await retrieveCachedData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, [])) || [];
-    const updatedIds = Array.from(new Set([...currentIds, ...newIds])).slice(-SEEN_VIDEO_IDS_LIMIT); // Keep the last SEEN_VIDEO_IDS_LIMIT ids
+    const updatedIds = [...newIds, ...currentIds].slice(0, SEEN_VIDEO_IDS_LIMIT);
     await cacheData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, updatedIds);
 };
 
