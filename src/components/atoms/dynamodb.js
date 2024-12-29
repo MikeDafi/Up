@@ -19,17 +19,15 @@ export const createVideoMetadata = async (metadata) => {
     return false;
   }
 };
-export const fetchFeed = async (args) => {
+export const fetchFeed = async (payload) => {
   try {
-    // Construct query parameters from the args object
-    const queryParams = new URLSearchParams(args).toString();
-    const urlWithParams = `${GET_FEED_URL}?${queryParams}`;
-
-    const response = await fetch(urlWithParams, {
-      method: 'GET',
+    // Send the payload as the body of the POST request
+    const response = await fetch(GET_FEED_URL, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify(payload), // Directly use the provided dictionary
     });
 
     const processedResponse = await handleResponse(response, "Failed to fetch video feed");

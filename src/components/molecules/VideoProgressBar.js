@@ -1,122 +1,125 @@
-import React, { useState, useContext, useEffect, useRef } from "react";
-import { View, StyleSheet, Dimensions, TouchableWithoutFeedback, Image } from "react-native";
-import { VideoContext } from './VideoProvider';
+import React, {useState, useContext, useEffect, useRef} from "react";
+import {View, StyleSheet, Dimensions, TouchableWithoutFeedback} from "react-native";
+import {VideoContext} from "./VideoProvider";
 import Slider from "@react-native-community/slider";
 
-const { width } = Dimensions.get("window");
+const {width} = Dimensions.get("window");
 
 const VideoProgressBar = () => {
   const {
-    videoIndexExternalView,
-    videoSlideVideoRefs,
-    setPaused,
-    isPaused, // From context to determine if the video is paused
+    videoIndexExternalView, videoSlideVideoRefs, setPaused, isPaused,
   } = useContext(VideoContext);
 
   const [progress, setProgress] = useState(0); // Current playback position
-  const [duration, setDuration] = useState(0); // Video duration (default to avoid division by 0)
+  const [duration, setDuration] = useState(0); // Video duration
   const [isDragging, setIsDragging] = useState(false);
 
-  const lastProgress = useRef(0); // Store the last known progress from video status
-  const lastTimestamp = useRef(0); // Store the last timestamp when progress was updated
-  const playbackRate = useRef(1); // Store the playback rate (default 1.0)
+  const lastUpdateTimeRef = useRef(Date.now());
 
-  // Fetch video status periodically
-  const updateProgress = async () => {
+  // Update video progress periodically
+  const initializeVideo = async () => {
     const currentVideoRef = videoSlideVideoRefs.current[videoIndexExternalView];
     if (!currentVideoRef) {
-      return
+      setProgress(0);
+      setDuration(0);
     }
+
     const status = await currentVideoRef.getStatusAsync();
     if (status.isLoaded) {
-      if (!isDragging) {
-        setProgress(status.positionMillis); // Update UI progress
-      }
-      setDuration(status.durationMillis); // Update video duration
-      lastProgress.current = status.positionMillis; // Store last progress
-      playbackRate.current = status.rate; // Store playback rate
-      lastTimestamp.current = Date.now(); // Record the timestamp
+      console.log("updateProgress", status.positionMillis);
+      setProgress(status.positionMillis); // Sync slider progress with video
+      setDuration(status.durationMillis); // Sync duration
     }
   };
 
-  // Interpolate progress for finer updates
+  // Dynamically interpolate progress as the video plays
   useEffect(() => {
-    const interval = setInterval(async () => {
-      if (duration === 0) {
+    const interpolate = async () => {
+      if (isPaused || isDragging) {
         return;
-      }
+      } // Skip interpolation when paused or dragging
 
       const currentVideoRef = videoSlideVideoRefs.current[videoIndexExternalView];
       if (!currentVideoRef) {
-        return
+        return;
       }
+
+      const now = Date.now();
+      const elapsedTime = now - lastUpdateTimeRef.current;
+      lastUpdateTimeRef.current = now;
+
       const status = await currentVideoRef.getStatusAsync();
-      if (!isDragging && !isPaused && status.isLoaded) { // Only interpolate if video is not paused
-        const now = Date.now();
-        const elapsedTime = now - lastTimestamp.current; // Time since last video status update
-        const interpolatedProgress =
-            lastProgress.current + elapsedTime * playbackRate.current; // Estimate progress
-        setProgress(Math.min(interpolatedProgress, status.durationMillis)); // Ensure progress doesn't exceed duration
+      if (status.isLoaded) {
+        const videoPosition = status.positionMillis;
+        const diff = Math.abs(videoPosition - progress);
+
+        // Adjust interpolation speed based on the difference between the video position and the current progress
+        const CATCHUP_TIME_SECONDS = 2000; // Time to catch up to real-time
+        const newProgress = progress + (videoPosition - progress) * (diff < 500 ? 1 : (elapsedTime > 100 ? 1
+            / CATCHUP_TIME_SECONDS : elapsedTime / CATCHUP_TIME_SECONDS));
+        if (newProgress >= progress) {
+          setProgress(newProgress); // Update slider progress
+        }
+        setDuration(status.durationMillis); // Sync duration
       }
-    }, 16); // Update every ~16ms (approx. 60 FPS)
+    };
 
-    return () => clearInterval(interval); // Cleanup interval on unmount
-  }, [isDragging, isPaused, duration]);
+    const interval = setInterval(interpolate, 1); // Approx. 60 FPS
+    return () => clearInterval(interval); // Cleanup on unmount
+  }, [progress, isPaused, isDragging]);
 
-  // Fetch video status every 500ms
+  // Periodically fetch the video status
   useEffect(() => {
-    const interval = setInterval(updateProgress, 500); // Fetch video status every 500ms
-    return () => clearInterval(interval); // Cleanup interval on unmount
-  }, [videoIndexExternalView, isDragging]);
+    initializeVideo();
+  }, [videoIndexExternalView]);
 
-  // Handle slider value change in real-time
-  const handleValueChange = async (value) => {
-    setProgress(value);
-    const currentVideoRef = videoSlideVideoRefs.current[videoIndexExternalView];
-    if (currentVideoRef) {
-      await currentVideoRef.setPositionAsync(value); // Update video position in real-time
-    }
-    setPaused(true); // Pause video during dragging
+  // Handle slider value change during drag
+  const handleValueChange = (value) => {
+    console.log("handleValueChange", value);
+    setProgress(value); // Update progress in real-time
+  };
+
+  // Handle start of dragging
+  const handleSlidingStart = () => {
+    setPaused(true); // Pause video
     setIsDragging(true);
   };
 
-  // Handle slider release
-  const handleSlidingComplete = () => {
-    setPaused(false); // Resume video after dragging
+  // Handle end of dragging
+  const handleSlidingComplete = async (value) => {
     setIsDragging(false);
+
+    const currentVideoRef = videoSlideVideoRefs.current[videoIndexExternalView];
+    if (currentVideoRef) {
+      await currentVideoRef.setPositionAsync(value); // Update video position
+      currentVideoRef.playAsync(); // Resume video playback
+    }
+
+    setPaused(false); // Resume video playback
   };
 
-  return (
-      <View >
-        <TouchableWithoutFeedback>
-          <View style={styles.progressBarContainer}>
-            <Slider
-                style={styles.slider}
-                minimumValue={0}
-                maximumValue={duration}
-                value={progress}
-                minimumTrackTintColor="#FFFFFF"
-                maximumTrackTintColor="#CCCCCC"
-                onValueChange={handleValueChange} // Update video position during drag
-                onSlidingComplete={handleSlidingComplete} // Resume video after drag
-            />
-          </View>
-        </TouchableWithoutFeedback>
+  return (<View>
+    <TouchableWithoutFeedback>
+      <View style={styles.progressBarContainer}>
+        <Slider
+            minimumValue={0}
+            maximumValue={duration}
+            value={progress}
+            minimumTrackTintColor="#FFFFFF"
+            maximumTrackTintColor="#CCCCCC"
+            onValueChange={handleValueChange} // Update progress during drag
+            onSlidingStart={handleSlidingStart} // Pause video during drag
+            onSlidingComplete={handleSlidingComplete} // Resume video after drag
+        />
       </View>
-  );
+    </TouchableWithoutFeedback>
+  </View>);
 };
 
 const styles = StyleSheet.create({
   progressBarContainer: {
-    position: "absolute",
-    bottom: 99,
-    width: width - 50,
-    left: 0
-  },
-  slider: {
-    width: "100%",
-    height: 30,
-  },
+    position: "absolute", bottom: -18, width: width - 50, left: 0
+  }
 });
 
-export default VideoProgressBar;
+export default VideoProgressBar

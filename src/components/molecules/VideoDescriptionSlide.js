@@ -44,7 +44,7 @@ const VideoDescriptionSlide = () => {
   }
 
   return (
-      <View style={styles.container}>
+      <View>
         <View style={styles.overflowContainer}>
           <Animated.View
               style={[
@@ -63,17 +63,8 @@ const VideoDescriptionSlide = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
   overflowContainer: {
     overflow: 'hidden',
-    width: '5000%',
     height: '100%',
   },
   slidingTextWrapper: {

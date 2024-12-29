@@ -21,7 +21,7 @@ return fallback;
 
 export const updateSeenVideoMetadatasCache = async (video_feed_type, newIds) => {
     const currentIds = (await retrieveCachedData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, [])) || [];
-    const updatedIds = Array.from(new Set([...currentIds, ...newIds])).slice(-SEEN_VIDEO_IDS_LIMIT); // Keep the last SEEN_VIDEO_IDS_LIMIT ids
+    const updatedIds = [...newIds, ...currentIds].slice(0, SEEN_VIDEO_IDS_LIMIT);
     await cacheData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, updatedIds);
 };
 
@@ -39,7 +39,7 @@ export const setVideoIndexIdealStateCache = async (video_feed_type, index) =>
 export const getVideoMetadatasCache = async (video_feed_type) => {
     const videoRawMetadatas = await retrieveCachedData(`${video_feed_type}/${CURRENT_VIDEO_PATHS_KEY}`, []);
     if (!Array.isArray(videoRawMetadatas)) {
-        console.error('Invalid cached video metadata:', videoRawMetadatas);
+        console.warn('Invalid cached video metadata:', videoRawMetadatas);
         return [];
     }
     return videoRawMetadatas.map((videoRawMetadata) => new VideoMetadata(videoRawMetadata));
