@@ -2,6 +2,7 @@ import React, {useState, useContext, useEffect, useRef} from "react";
 import {View, StyleSheet, Dimensions, TouchableWithoutFeedback} from "react-native";
 import {VideoContext} from "./VideoProvider";
 import Slider from "@react-native-community/slider";
+import {RIGHT_PADDING_FOR_CONTROLLERS} from "../atoms/constants";
 
 const {width} = Dimensions.get("window");
 
@@ -75,7 +76,6 @@ const VideoProgressBar = () => {
 
   // Handle slider value change during drag
   const handleValueChange = (value) => {
-    console.log("handleValueChange", value);
     setProgress(value); // Update progress in real-time
   };
 
@@ -118,7 +118,7 @@ const VideoProgressBar = () => {
 
 const styles = StyleSheet.create({
   progressBarContainer: {
-    position: "absolute", bottom: -18, width: width - 50, left: 0
+    position: "absolute", bottom: -18, width: width - RIGHT_PADDING_FOR_CONTROLLERS, left: 0
   }
 });
 

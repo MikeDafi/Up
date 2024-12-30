@@ -107,6 +107,7 @@ const VideoProvider = ({children, video_feed_type}) => {
 
   // Fetch new videos, avoiding previously seen IDs
   const fetchNewVideosOnEndReached = async (setRefreshingVariable = true) => {
+    console.log("fetchNewVideosOnEndReached:: ", setRefreshingVariable, "videoMetadatas", videoMetadatas.length, "videoIndexExternalView", videoIndexExternalView);
     setError(null);
     if (setRefreshingVariable) { // in the case of automatic refresh, we don't want to show the spinner
       setRefreshing(true);
@@ -186,15 +187,15 @@ const VideoProvider = ({children, video_feed_type}) => {
     itemVisiblePercentThreshold: 50, // Item is considered viewable if 50% of it is visible
   });
 
-  const onViewableItemsChanged = useCallback(async ({viewableItems}) => {
+  const onViewableItemsChanged = async ({viewableItems}) => {
     if (viewableItems.length > 0) {
-      console.debug("onViewableItemsChanged viewableItems:", viewableItems);
+      console.debug(viewableItems, "videoIndexExternalView", videoIndexExternalView, "videoMetadatas", videoMetadatas.length);
       setVideoIndexExternalView(viewableItems[0].index);
       setVideoIndexIdealStateCache(video_feed_type, viewableItems[0].index);
       setMuted(video_feed_type === VideoFeedType.VIDEO_FOCUSED_FEED);
       setPaused(false);
     }
-  }, []);
+  }
 
   const providerHandlePausePress = () => {
     setPaused((prev) => !prev);
