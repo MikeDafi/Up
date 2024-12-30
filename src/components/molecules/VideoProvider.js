@@ -116,7 +116,7 @@ const VideoProvider = ({children, video_feed_type}) => {
     let videoMetadataBatch = [];
     try {
       const seenVideoMetadatas = await getSeenVideoMetadatasCache(video_feed_type);
-      const seenVideoIds = seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId);
+      const seenVideoIds = seenVideoMetadatas ? seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId): [];
       const videoRawMetadataBatch = await backoff(fetchFeed, 3, 1000, 10000)({
         video_feed_type: video_feed_type,
         exclude_video_ids: seenVideoIds,
