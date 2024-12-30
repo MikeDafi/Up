@@ -1,71 +1,93 @@
-import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, StyleSheet, Text, View } from 'react-native';
+import React, { useContext, useEffect, useRef, useMemo, useState } from 'react';
+import { Animated, Dimensions, Easing, StyleSheet, Text, View, TouchableWithoutFeedback, ScrollView } from 'react-native';
 import { VideoContext } from "./VideoProvider";
 
+const windowWidth = Dimensions.get('window').width;
+const BASE_WIDTH = 55; // Base width for initial padding or margins
+const CHARACTER_WIDTH = 11; // Approximate width per character for text
+const EXPANDED_HEIGHT = 100; // Height of the expanded view
+
 const VideoDescriptionSlide = () => {
-  const { videoMetadatas, videoIndexExternalView } = useContext(VideoContext);
+  const { videoMetadatas = [], videoIndexExternalView = 0 } = useContext(VideoContext);
   const slidingAnimation = useRef(new Animated.Value(0)).current;
+  const [isExpanded, setIsExpanded] = useState(false); // State to toggle between expanded and sliding view
 
-  const windowWidth = Dimensions.get('window').width;
+  const description = useMemo(() => {
+    if (videoMetadatas.length === 0) return '';
+    return videoMetadatas[videoIndexExternalView].description || '';
+  }, [videoMetadatas, videoIndexExternalView]);
 
-  const getDescription = () => {
-    if (videoMetadatas.length === 0) {
-      return '';
-    }
-    return videoMetadatas[videoIndexExternalView]?.description || '';
-  };
-  // generate a video description
-  const [textWidth, setTextWidth] = useState(0);
-
-  // Start the sliding animation
   useEffect(() => {
-    if (textWidth > 0) {
-      const distance = textWidth + windowWidth; // Total distance to move
-      const duration = (distance / 75) * 1000; // Convert to milliseconds
-      slidingAnimation.setValue(windowWidth); // Start fully off-screen
-      Animated.loop(
+    if (!isExpanded && description.length > 0) {
+      const textWidth = BASE_WIDTH + CHARACTER_WIDTH * description.length;
+      const distance = textWidth + windowWidth;
+      const duration = (distance / 90) * 1000; // Speed control
+      slidingAnimation.setValue(windowWidth);
+
+      const animation = Animated.loop(
           Animated.timing(slidingAnimation, {
-            toValue: -textWidth, // Slide off-screen to the left
-            duration: duration, // Adjust speed
+            toValue: -textWidth,
+            duration: duration,
             easing: Easing.linear,
             useNativeDriver: true,
           })
-      ).start();
+      );
+
+      animation.start();
+
+      return () => animation.stop();
     }
-  }, [textWidth, windowWidth]);
+  }, [description, isExpanded]);
 
-  const handleTextLayout = (event) => {
-    const { width } = event.nativeEvent.layout;
-    setTextWidth(width); // Measure text width
-  };
-
-  if (!getDescription()) {
+  if (description === '') {
     return null;
   }
 
   return (
-      <View>
-        <View style={styles.overflowContainer}>
-          <Animated.View
-              style={[
-                styles.slidingTextWrapper,
-                { transform: [{ translateX: slidingAnimation }] },
-              ]}
-          >
-            {/* Remove `numberOfLines` to avoid truncation */}
-            <Text style={styles.text} onLayout={handleTextLayout}>
-              {getDescription()}
-            </Text>
-          </Animated.View>
+      <TouchableWithoutFeedback onPress={() => setIsExpanded(!isExpanded)}>
+        <View style={[styles.overflowContainer, isExpanded && styles.expandedContainer]}>
+          {isExpanded ? (
+              <ScrollView>
+                <Text style={[styles.text, styles.expandedText]}>{description}</Text>
+              </ScrollView>
+          ) : (
+              <View style={{ width: BASE_WIDTH + CHARACTER_WIDTH * description.length }}>
+                <Animated.View
+                    style={[
+                      styles.slidingTextWrapper,
+                      { transform: [{ translateX: slidingAnimation }] },
+                    ]}
+                >
+                  <Text
+                      style={styles.text}
+                      accessible={true}
+                      numberOfLines={1}
+                      accessibilityRole="text"
+                      accessibilityLabel={description}
+                  >
+                    {description}
+                  </Text>
+                </Animated.View>
+              </View>
+          )}
         </View>
-      </View>
+      </TouchableWithoutFeedback>
   );
 };
 
 const styles = StyleSheet.create({
   overflowContainer: {
-    overflow: 'hidden',
-    height: '100%',
+    position: 'absolute',
+    bottom: 0,
+    width: windowWidth - 25, // Restricts visible area
+    left: 0,
+    height: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    overflow: 'hidden', // Ensures text outside this container is clipped
+  },
+  expandedContainer: {
+    height: EXPANDED_HEIGHT, // Expanded view height
+    overflow: 'scroll', // Allow scrolling in expanded view
   },
   slidingTextWrapper: {
     flexDirection: 'row',
@@ -76,7 +98,11 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
-    paddingRight: 20, // Add spacing between repeated text
+    paddingRight: 20, // Add spacing between repeated text if needed
+  },
+  expandedText: {
+    padding: 10, // Add padding for readability in expanded view
+    fontSize: 14, // Slightly smaller font in expanded view
   },
 });
 

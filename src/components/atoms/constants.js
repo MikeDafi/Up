@@ -23,7 +23,7 @@ export const SEEN_VIDEOS_FETCH_FEED_THRESHOLD_PERCENTAGE = 0.6;
 
 export const NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE = 4;
 
-export const NUM_VIDEOS_TO_REQUEST = 5;
+export const NUM_VIDEOS_TO_REQUEST = 10;
 
 export const PADDING_VIDEO_W_AUDIO_FEED = '10.5%'; // padding from bottom for video w audio feed
 export const PADDING_BOTTOM_CONTROLLER_WRAPPER = '17.5%'; // bottom controller padding from bottom
@@ -31,3 +31,5 @@ export const HEIGHT_VIDEO_W_AUDIO_FEED = '60.5%'; // this value - PADDING_VIDEO_
 export const HEIGHT_VIDEO_W_AUDIO_VIDEO_IN_VIDEO_SLIDE = '90%';
 
 export const VIDEO_REFRESH_PERIOD_SECONDS = 600000; // 10 minutes
+
+export const RIGHT_PADDING_FOR_CONTROLLERS = 25;

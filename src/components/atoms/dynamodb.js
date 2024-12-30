@@ -29,7 +29,6 @@ export const fetchFeed = async (payload) => {
       },
       body: JSON.stringify(payload), // Directly use the provided dictionary
     });
-
     const processedResponse = await handleResponse(response, "Failed to fetch video feed");
     const data = await processedResponse.json();
     console.debug('Fetched feed:', data);
