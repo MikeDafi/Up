@@ -140,7 +140,7 @@ const VideoSlide = () => {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#000',
+    backgroundColor: 'transparent',
   },
   videowaudioFeedContainer: {
     paddingBottom: PADDING_VIDEO_W_AUDIO_FEED,

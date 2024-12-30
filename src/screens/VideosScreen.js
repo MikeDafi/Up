@@ -36,7 +36,8 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         height: HEIGHT_VIDEO_W_AUDIO_FEED,
-        zIndex: 0, // Ensure it's above the audio feed
+        backgroundColor:"transparent",
+        zIndex: 1, // Ensure it's above the audio feed
     },
     videofocusedFeedContainer: {
         position: 'absolute',
@@ -44,7 +45,7 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         height: '50%',
-        zIndex: 1, // Ensure it's below the focused feed
+        zIndex: 0, // Ensure it's below the focused feed
     }
 });
 
