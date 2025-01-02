@@ -27,7 +27,6 @@ const VideoProgressBar = () => {
 
     const status = await currentVideoRef.getStatusAsync();
     if (status.isLoaded) {
-      console.log("updateProgress", status.positionMillis);
       setProgress(status.positionMillis); // Sync slider progress with video
       setDuration(status.durationMillis); // Sync duration
     }

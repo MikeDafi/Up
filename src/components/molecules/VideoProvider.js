@@ -1,8 +1,12 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Text, View, Alert} from 'react-native';
+import {Text, View, Alert, ActivityIndicator} from 'react-native';
 import PropTypes from 'prop-types';
+
 import {
-  NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE, NUM_VIDEOS_TO_REQUEST, VIDEO_REFRESH_PERIOD_SECONDS, VideoFeedType
+  NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE,
+  NUM_VIDEOS_TO_REQUEST, REATTEMPT_FETCHING_FEED_INTERVAL,
+  VIDEO_REFRESH_PERIOD_SECONDS,
+  VideoFeedType
 } from '../atoms/constants';
 import {fetchFeed} from '../atoms/dynamodb';
 import {backoff} from '../atoms/utilities';
@@ -105,6 +109,16 @@ const VideoProvider = ({children, video_feed_type}) => {
     setRefreshing(false);
   }
 
+  useEffect(() => {
+    if (videoMetadatas.length === 0) {
+      const retryFetch = setTimeout(() => {
+        fetchNewVideosManually();
+      }, REATTEMPT_FETCHING_FEED_INTERVAL); // Retry after 30 seconds
+
+      return () => clearTimeout(retryFetch); // Cleanup timeout on unmount or state change
+    }
+  }, [videoMetadatas]);
+
   // Fetch new videos, avoiding previously seen IDs
   const fetchNewVideosOnEndReached = async (setRefreshingVariable = true) => {
     console.log("fetchNewVideosOnEndReached:: ", setRefreshingVariable, "videoMetadatas", videoMetadatas.length, "videoIndexExternalView", videoIndexExternalView);
@@ -119,7 +133,7 @@ const VideoProvider = ({children, video_feed_type}) => {
       const seenVideoIds = seenVideoMetadatas ? seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId): [];
       const videoRawMetadataBatch = await backoff(fetchFeed, 3, 1000, 10000)({
         video_feed_type: video_feed_type,
-        exclude_video_ids: seenVideoIds,
+        // exclude_video_ids: seenVideoIds,
         limit: NUM_VIDEOS_TO_REQUEST,
       });
       videoMetadataBatch = videoRawMetadataBatch.map(videoRawMetadata => new VideoMetadata(videoRawMetadata));
@@ -228,8 +242,9 @@ const VideoProvider = ({children, video_feed_type}) => {
 
   if (videoMetadatas.length === 0) {
     return (
-        <View style={{justifyContent: "center", alignItems: "center", top: 200 }}>
-          <Text style={{ color: "red" }}>No videos you havent seen before exist</Text>
+        <View style={{justifyContent: "center", alignItems: "center", top: 150 }}>
+          <ActivityIndicator size="large" color="yellow" />
+          <Text style={{ marginTop: 20, color: "white" }}>Attempting to fetch videos every {REATTEMPT_FETCHING_FEED_INTERVAL/1000} seconds</Text>
         </View>
     );
   }

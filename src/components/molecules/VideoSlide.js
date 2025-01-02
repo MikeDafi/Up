@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   View,
+  Text,
   ScrollView,
   RefreshControl,
 } from 'react-native';
@@ -51,11 +52,6 @@ const VideoSlide = () => {
   };
 
   const windowWidth = Dimensions.get('window').width;
-
-  const getOnEndThreshold = () => {
-    if (!videoMetadatas || videoMetadatas.length === 0) return 0.1;
-    return 1 - NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE / videoMetadatas.length;
-  };
 
   const renderItem = ({ item, index }) => {
     const videoStyle = {
@@ -121,7 +117,7 @@ const VideoSlide = () => {
               viewabilityConfig={viewabilityConfig.current}
               onViewableItemsChanged={onViewableItemsChanged}
               onEndReached={() => fetchNewVideosOnEndReached(false)}
-              onEndReachedThreshold={getOnEndThreshold()}
+              onEndReachedThreshold={NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE}
               showsHorizontalScrollIndicator={false}
               getItemLayout={(data, index) => ({
                 length: windowWidth,
