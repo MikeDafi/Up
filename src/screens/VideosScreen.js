@@ -1,24 +1,46 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import VideoFocusedFeed from "../components/organisms/VideoFocusedFeed";
 import VideowAudioFeed from "../components/organisms/VideowAudioFeed";
 import { ENV_NAME } from '@env';
 import {HEIGHT_VIDEO_W_AUDIO_FEED} from "../components/atoms/constants";
+import VideoScreenTutorial from "../components/organisms/VideoScreenTutorial";
+import {getAndSetVideoScreenTutorialSeenCache} from "../components/atoms/videoCacheStorage";
+
+export const VideoScreenContext = React.createContext();
+
 
 const VideosScreen = () => {
+    const [videoScreenTutorialEnabled, setVideoScreenTutorialEnabled] = React.useState(false);
+
+    useEffect(() => {
+        const loadTutorialState = async () => {
+            const seenTutorial = await getAndSetVideoScreenTutorialSeenCache();
+            setVideoScreenTutorialEnabled(!seenTutorial);
+        };
+        loadTutorialState();
+    }, []);
+
     return (
-        <View style={styles.videosScreenContainer}>
-            <View style={styles.videotimelinesContainer}>
-                <View style={styles.videofocusedFeedContainer}>
-                    <VideoFocusedFeed />
-                </View>
-                <View style={styles.videowaudioFeedContainer}>
-                    <VideowAudioFeed />
+        <VideoScreenContext.Provider value={{
+            videoScreenTutorialEnabled,
+            setVideoScreenTutorialEnabled,
+        }}>
+            <View style={styles.videosScreenContainer}>
+                <View style={styles.videotimelinesContainer}>
+                    <View style={styles.videofocusedFeedContainer}>
+                        <VideoFocusedFeed />
+                    </View>
+                    <View style={styles.videowaudioFeedContainer}>
+                        <VideowAudioFeed />
+                    </View>
+                    <VideoScreenTutorial />
                 </View>
             </View>
-        </View>
+        </VideoScreenContext.Provider>
     );
 };
+
 
 const styles = StyleSheet.create({
     videosScreenContainer: {

@@ -49,3 +49,12 @@ export const setVideoMetadatasCache = async (video_feed_type, videoMetadatas) =>
     cacheData(`${video_feed_type}/${CURRENT_VIDEO_PATHS_KEY}`,
         videoMetadatas.map((videoMetadata) => videoMetadata.toJSON()));
 }
+
+export const getAndSetVideoScreenTutorialSeenCache = async () => {
+    const seen = await retrieveCachedData('videoScreenTutorialSeen', false);
+    if (!seen) {
+        await cacheData('videoScreenTutorialSeen', true);
+    }
+    console.log('seen', seen);
+    return seen;
+}
