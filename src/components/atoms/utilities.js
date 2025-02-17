@@ -52,6 +52,14 @@ export const handleResponse = async (response, actionDescription = "Request fail
   return response;
 };
 
+export const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 
 
 // Monkey patch global objects for debugging purposes

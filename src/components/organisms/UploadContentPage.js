@@ -100,7 +100,7 @@ const UploadContentPage = () => {
     try {
       const fileName = media.split('/').pop();
       const contentType = 'video/mp4';
-      const presignedUrl = await backoff(getPresignedUrl, 3, 1000, 10000)(fileName, contentType);
+      const presignedUrl = await backoff(getPresignedUrl, 2, 1000, 10000)(fileName, contentType);
 
       // Upload video to S3
       const isUploaded = await backoff(
@@ -126,7 +126,7 @@ const UploadContentPage = () => {
         country: geoLocation.country
       });
 
-      await backoff(createVideoMetadata, 3, 1000, 15000)(metadata);
+      await backoff(createVideoMetadata, 2, 1000, 15000)(metadata);
       setProgress(1.0); // Completion
       setIsSuccessModalVisible(true);
       await new Promise((r) => setTimeout(r, 1000));

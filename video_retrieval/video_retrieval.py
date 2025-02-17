@@ -4,6 +4,7 @@ import requests
 from datetime import datetime
 import subprocess
 import json
+import backoff
 
 # Constants for API URLs
 S3_API_URL = "https://o28an1f9e8.execute-api.us-east-2.amazonaws.com/prod"
@@ -58,8 +59,13 @@ def crop_video(file_path):
         "-of", "csv=p=0",
         file_path
     ]
+
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    width, height, bit_rate = map(int, result.stdout.strip().split(","))
+    try:
+        width, height, bit_rate = map(int, result.stdout.strip().split(","))
+    except ValueError as e:
+        print(f"Open the {file_path}, it'll show you the error with the download mp4. {' '.join(cmd)} {result=} {e}")
+        raise
 
     if height > width:
         crop_height = int(height * 0.7)
@@ -88,30 +94,46 @@ def crop_video(file_path):
     subprocess.run(cmd, check=True)
     return output_path
 
-# Function to download video
-def download_video(video_info, save_folder):
+
+@backoff.on_exception(backoff.constant, Exception, interval=60, max_tries=3)
+def download_video_ssstik(video_info, save_folder):
+    """
+    Download a video from ssstik and ensure the file exists after downloading.
+    Retries up to 3 times with a 60-second wait between each attempt.
+    """
     id = video_info["id"]
     username = video_info["author"]["uniqueId"]
 
-    request_url = (
-        f"http://localhost/api/download?url=https%3A%2F%2Fwww.tiktok.com%2F@{username}%2Fvideo%2F{id}"
-        "&prefix=true&with_watermark=false"
-    )
+    request_url = f"https://tikcdn.io/ssstik/{id}"
 
+    # Construct the save folder path
     date = datetime.now().strftime("%Y-%m-%d")
     save_folder = os.path.expanduser(f"~/Documents/tiktok/{date}/{save_folder}")
     create_directory(save_folder)
 
+    # Construct the save path
     save_path = os.path.join(save_folder, f"{id}.mp4")
+    print(f"Downloading video from {request_url} to {save_path}")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36"
+    }
 
-    video_response = requests.get(request_url)
+    # Perform the download
+    video_response = requests.get(request_url, stream=True, headers=headers)
     video_response.raise_for_status()
     with open(save_path, "wb") as f:
         for chunk in video_response.iter_content(chunk_size=8192):
             f.write(chunk)
 
-    return save_path
+    # Check if the file exists and raise an exception if it does not
+    if not os.path.exists(save_path):
+        raise FileNotFoundError(f"Download failed: {save_path} does not exist.")
 
+    # Check if the file is empty
+    if os.path.getsize(save_path) == 0:
+        raise ValueError(f"Download failed: {save_path} is empty (0 bytes).")
+
+    return save_path
 
 def get_videos_by_hashtags(hashtags):
     """
@@ -201,7 +223,7 @@ def upload_trending_videos(mute_by_default):
     for video_info in videos:
         description = video_info.get("desc", "")
         hashtags = [tag["hashtagName"] for tag in video_info.get("textExtra", []) if "hashtagName" in tag]
-        file_path = download_video(video_info, "trending")
+        file_path = download_video_ssstik(video_info, "trending")
         print(f"{description=}, {hashtags=}, {file_path=}")
         submit_media(file_path, description, hashtags, mute_by_default)
 
@@ -210,13 +232,17 @@ def upload_trending_videos(mute_by_default):
 @click.option("--mute-by-default", is_flag=True, help="Mute videos by default when uploading metadata.")
 def upload_videos_by_hashtags(hashtags, mute_by_default):
     videos = get_videos_by_hashtags(hashtags)
-    for video_info in videos:
-        video_info = video_info["item"]
-        description = video_info.get("desc", "")
-        hashtags = [tag["hashtagName"] for tag in video_info.get("textExtra", []) if "hashtagName" in tag]
-        print(f"{description=}, {hashtags=}")
-        file_path = download_video(video_info, "hashtags")
-        submit_media(file_path, description, hashtags, mute_by_default)
+    for i, video_info in enumerate(videos):
+        try:
+            video_info = video_info["item"]
+            description = video_info.get("desc", "")
+            hashtags = [tag["hashtagName"] for tag in video_info.get("textExtra", []) if "hashtagName" in tag]
+            print(f"{description=}, {hashtags=}")
+            file_path = download_video_ssstik(video_info, "hashtags")
+            submit_media(file_path, description, hashtags, mute_by_default)
+        except Exception as e:
+            print(f"Completed {i} videos, error: {e}")
+            break
 
 cli.add_command(upload_trending_videos)
 cli.add_command(upload_videos_by_hashtags)

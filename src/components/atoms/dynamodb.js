@@ -1,5 +1,23 @@
-import {CREATE_VIDEO_METADATA_URL, GET_FEED_URL} from "./constants";
+import {CREATE_VIDEO_METADATA_URL, GET_FEED_URL, UPDATE_USER_DATA_URL} from "./constants";
 import { handleResponse } from "./utilities";
+
+export const updateUserData = async (payload) => {
+  try {
+    const response = await fetch(UPDATE_USER_DATA_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    await handleResponse(response, "Failed to update user data");
+    return true; // Return success if no error is thrown
+  } catch (error) {
+    console.error('Error updating user data:', error.message);
+    return false;
+  }
+}
 
 export const createVideoMetadata = async (metadata) => {
   console.debug("Creating video metadata:", metadata);
@@ -31,14 +49,12 @@ export const fetchFeed = async (payload) => {
     });
     const processedResponse = await handleResponse(response, "Failed to fetch video feed");
     const data = await processedResponse.json();
-    console.debug('Fetched feed:', data);
-
-    if (!Array.isArray(data)) {
-      throw new Error('Unexpected response format: Expected an array');
-    }
-
     return data;
   } catch (error) {
+    if (error.message.includes("Too many new feed requests")) {
+      console.warn('Failed to fetch feed:', error.message);
+      return error.message;
+    }
     console.error('Error fetching feed:', error.message);
     throw error; // Re-throw to allow the caller to handle it
   }

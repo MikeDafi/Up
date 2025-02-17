@@ -1,6 +1,6 @@
 # Up
 
-This document provides instructions on how to setup this repository and install Expo on iOS for testing.
+This document provides instructions on how to set up this repository and install Expo on iOS for testing.
 
 ## Repository Setup
 
@@ -31,10 +31,11 @@ This document provides instructions on how to setup this repository and install 
 ## Testing the Project via Expo Go
 
 1. Ensure your iOS device and development machine are on the same network.
-2. In the Expo Dev Tools, and scan the QR code with the Expo Go app.
+2. In the Expo Dev Tools, scan the QR code with the Expo Go app.
 3. The app should now be running on your device.
 
 ## Testing the Project via Simulator
+
 1. Ensure you have Xcode installed on your development machine.
 2. Start the iOS simulator by running the following command in the terminal:
     ```
@@ -44,9 +45,20 @@ This document provides instructions on how to setup this repository and install 
 3. In the Expo Dev Tools, click on "Run on iOS simulator" or press `i` in the terminal.
 4. The app should now be running on the simulator.
 
-## Example of app running
+## Example of App Running
 
 ![Simulator Screenshot](./assets/Simulator_screenshot.png)
+
+## Troubleshooting
+
+If you encounter `ReferenceError: ReadableStream is not defined`, it may be due to an incorrect Node.js version. To resolve this:
+
+1. Ensure you have [nvm](https://github.com/nvm-sh/nvm) installed.
+2. In the project directory, run:
+    ```
+    nvm use
+    ```
+   This will switch to the Node.js version specified in the `.nvmrc` file.
 
 ## Contributing
 - Michael Askndafi
