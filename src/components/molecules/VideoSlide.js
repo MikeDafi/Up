@@ -65,7 +65,7 @@ const VideoSlide = () => {
     };
 
     const handleVideoError = (videoId, error) => {
-      if (error.includes('-1102 and domain \\"NSURLErrorDomain\\"')) {
+      if (error.includes('AVPlayer')) {
         error = "Failed to load video. May not exist anymore.";
       }
       setVideoError(error);
