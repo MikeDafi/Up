@@ -25,7 +25,7 @@ const VideoScreenTutorial = () => {
               </View>
               <View style={styles.videofocusedFeedContainer}>
                 <Text style={styles.boxText}>Video Focused Feed</Text>
-                <Text style={styles.subText}>e.g. Sports Highlights, Timelapses, Art, Scenery, Gameplay</Text>
+                <Text style={styles.subText}>e.g. Sports Highlights, Timelapses, Art, Scenary, Gameplay</Text>
               </View>
             </>
         )}

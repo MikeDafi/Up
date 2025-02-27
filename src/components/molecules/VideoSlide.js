@@ -35,6 +35,8 @@ const VideoSlide = () => {
     onViewableItemsChanged,
     fetchNewVideosOnEndReached,
     fetchNewVideosManually,
+    videoError,
+    setVideoError,
   } = useContext(VideoContext);
 
   const scrollViewRef = useRef(null);
@@ -62,8 +64,15 @@ const VideoSlide = () => {
               : '100%',
     };
 
+    const handleVideoError = (videoId, error) => {
+      if (error.includes('-1102 and domain \\"NSURLErrorDomain\\"')) {
+        error = "Failed to load video. May not exist anymore.";
+      }
+      setVideoError(error);
+    };
+
     return (
-        <TouchableOpacity onPress={providerHandlePausePress} style={{ flex: 1 }}>
+        <TouchableOpacity onPress={providerHandlePausePress} style={{ flex: 1 }} activeOpacity={0.8}>
           <Video
               source={{ uri: `${COMPRESSED_S3_BUCKET}/${item.videoId}` }}
               style={videoStyle}
@@ -74,6 +83,7 @@ const VideoSlide = () => {
               useNativePlaybackControls
               downloadFirst
               onPlaybackStatusUpdate={providerHandlePlaybackStatusUpdate}
+              onError={(error) => handleVideoError(item.videoId, error)}
           />
         </TouchableOpacity>
     );

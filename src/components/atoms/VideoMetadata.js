@@ -2,7 +2,7 @@ export class VideoMetadata {
   constructor({
     videoId = '',
     title = '',
-    description = 'aaaaaaaaa aaaaaaaaa aaaaaaaaa aaaaaaaaa',
+    description = '',
     hashtags = [],
     muteByDefault = false,
     uploadedAt = '',

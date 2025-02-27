@@ -1,13 +1,37 @@
-import React from 'react';
+import React, {useEffect} from 'react';
 import VideosScreen from "./src/screens/VideosScreen";
 import CameraScreen from "./src/screens/CameraScreen";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Image, StyleSheet } from 'react-native';
+import {applyDecayToAllConfidenceScores, uploadHashtagConfidenceScores} from "./src/components/atoms/confidencescores";
+import {updateLastLoginTimestamp} from "./src/components/atoms/user_functions";
 
 const Tab = createBottomTabNavigator();
 
 export default function App() {
+
+  useEffect(() => {
+    const initialize = async () => {
+      try {
+        // Apply decay to all confidence scores
+        await applyDecayToAllConfidenceScores();
+
+        // Upload last login timestamp();
+        await updateLastLoginTimestamp();
+
+        // Upload hashtag confidence scores periodically
+        await uploadHashtagConfidenceScores();
+      } catch (error) {
+        console.error('Error during initialization:', error);
+      }
+    };
+
+    // Call the async function
+    initialize();
+  }, []);
+
+
   return (
       <NavigationContainer>
         <Tab.Navigator
