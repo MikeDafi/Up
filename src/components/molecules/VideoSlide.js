@@ -10,7 +10,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Video } from 'expo-av';
-import { VideoContext } from './VideoProvider';
+import { VideoContext } from '../atoms/contexts';
 import {
   COMPRESSED_S3_BUCKET,
   HEIGHT_VIDEO_W_AUDIO_VIDEO_IN_VIDEO_SLIDE,

@@ -1,6 +1,6 @@
 import React, {useContext} from 'react';
 import {Image, StyleSheet, TouchableOpacity, View} from 'react-native';
-import {VideoContext} from './VideoProvider';
+import {VideoContext} from '../atoms/contexts';
 
 const VideoSlideController = () => {
     const {isMuted, isLiked, providerHandleMutedPress, providerHandleLikePress, providerHandleBackArrowPress} = useContext(VideoContext);

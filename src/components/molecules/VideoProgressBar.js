@@ -1,6 +1,6 @@
 import React, {useState, useContext, useEffect, useRef} from "react";
 import {View, StyleSheet, Dimensions, TouchableWithoutFeedback} from "react-native";
-import {VideoContext} from "./VideoProvider";
+import {VideoContext} from "../atoms/contexts";
 import Slider from "@react-native-community/slider";
 import {RIGHT_PADDING_FOR_CONTROLLERS} from "../atoms/constants";
 

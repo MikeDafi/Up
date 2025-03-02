@@ -15,8 +15,8 @@ export const COMPRESSED_S3_BUCKET = `https://up-compressed-content.s3.us-east-2.
 
 export const GET_FEED_URL = `https://qi6dd69zxd.execute-api.us-east-2.amazonaws.com/${ENV_NAME}/feed`;
 
-export const SEEN_VIDEO_IDS_KEY = 'seen_video_ids';
-export const SEEN_VIDEO_IDS_LIMIT = 1000;
+export const SEEN_VIDEO_METADATAS_KEY = 'seen_video_metadatas';
+export const SEEN_VIDEO_METADATAS_LIMIT = 1000;
 export const CURRENT_VIDEO_INDEX_KEY = 'current_video_index';
 
 export const CURRENT_VIDEO_PATHS_KEY = 'current_video_paths';
@@ -38,7 +38,7 @@ export const SEEN_VIDEOS_FETCH_FEED_THRESHOLD_PERCENTAGE = 0.6;
 
 export const NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE = 5;
 
-export const NUM_VIDEOS_TO_REQUEST = 10;
+export const NUM_VIDEOS_TO_REQUEST = 30; // Hard cap is set on up-generated-feed lambda side
 
 export const PADDING_VIDEO_W_AUDIO_FEED = '10.5%'; // padding from bottom for video w audio feed
 export const PADDING_BOTTOM_CONTROLLER_WRAPPER = '17.5%'; // bottom controller padding from bottom

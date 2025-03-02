@@ -3,11 +3,10 @@ import { StyleSheet, View } from 'react-native';
 import VideoFocusedFeed from "../components/organisms/VideoFocusedFeed";
 import VideowAudioFeed from "../components/organisms/VideowAudioFeed";
 import { ENV_NAME } from '@env';
+import { VideoScreenContext } from '../components/atoms/contexts';
 import {HEIGHT_VIDEO_W_AUDIO_FEED} from "../components/atoms/constants";
 import VideoScreenTutorial from "../components/organisms/VideoScreenTutorial";
 import {getAndSetVideoScreenTutorialSeenCache} from "../components/atoms/videoCacheStorage";
-
-export const VideoScreenContext = React.createContext();
 
 
 const VideosScreen = () => {

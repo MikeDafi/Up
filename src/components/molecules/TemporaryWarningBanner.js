@@ -29,10 +29,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   banner: {
-    backgroundColor: 'rgba(255, 255, 255, 0.8)', // Semi-transparent white background
+    backgroundColor: 'black',
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 10,
+    borderColor: 'yellow',
   },
   warningText: {
     color: 'yellow',
