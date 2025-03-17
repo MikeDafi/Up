@@ -33,9 +33,7 @@ const VideoSlide = () => {
     video_feed_type,
     viewabilityConfig,
     onViewableItemsChanged,
-    fetchNewVideosOnEndReached,
-    fetchNewVideosManually,
-    videoError,
+    fetchNewVideos,
     setVideoError,
   } = useContext(VideoContext);
 
@@ -105,7 +103,7 @@ const VideoSlide = () => {
             refreshControl={
               <RefreshControl
                   refreshing={isRefreshing}
-                  onRefresh={fetchNewVideosManually}
+                  onRefresh={fetchNewVideos}
                   tintColor="#fff"
                   style={{ zIndex: 10 }}
               />
@@ -126,7 +124,7 @@ const VideoSlide = () => {
               keyExtractor={(item, index) => `${item.videoId}-${index}`}
               viewabilityConfig={viewabilityConfig.current}
               onViewableItemsChanged={onViewableItemsChanged}
-              onEndReached={() => fetchNewVideosOnEndReached(false)}
+              onEndReached={() => fetchNewVideos(false, false)}
               onEndReachedThreshold={NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE}
               showsHorizontalScrollIndicator={false}
               getItemLayout={(data, index) => ({

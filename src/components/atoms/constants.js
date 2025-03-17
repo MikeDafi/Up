@@ -17,6 +17,11 @@ export const GET_FEED_URL = `https://qi6dd69zxd.execute-api.us-east-2.amazonaws.
 
 export const SEEN_VIDEO_METADATAS_KEY = 'seen_video_metadatas';
 export const SEEN_VIDEO_METADATAS_LIMIT = 1000;
+
+export const SEEN_VIDEO_IDS_CHECKSUM_UPDATE_TIMESTAMP_KEY = 'seen_video_checksum_ids_update_timestamp';
+
+export const SEEN_VIDEO_IDS_CHECKSUM_UPDATE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+export const SEEN_VIDEO_IDS_CHECKSUM_UPLOAD_SIZE_LIMIT = 100;
 export const CURRENT_VIDEO_INDEX_KEY = 'current_video_index';
 
 export const CURRENT_VIDEO_PATHS_KEY = 'current_video_paths';
@@ -32,9 +37,7 @@ export const APPLY_DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000;  // 1 day
 export const BACKUP_USER_DATA_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 
 export const LAST_LOGIN_UPDATE_TIMESTAMP_KEY = 'last_login_update_timestamp';
-export const LAST_LOGIN_UPDATE_INTERVAL_MS = 1 * 24 * 60 * 60 * 1000; // 1 day
-
-export const SEEN_VIDEOS_FETCH_FEED_THRESHOLD_PERCENTAGE = 0.6;
+export const LAST_LOGIN_UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1 day
 
 export const NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE = 5;
 
@@ -45,7 +48,7 @@ export const PADDING_BOTTOM_CONTROLLER_WRAPPER = '17.5%'; // bottom controller p
 export const HEIGHT_VIDEO_W_AUDIO_FEED = '60.5%'; // this value - PADDING_VIDEO_W_AUDIO_FEED = 50%
 export const HEIGHT_VIDEO_W_AUDIO_VIDEO_IN_VIDEO_SLIDE = '90%';
 
-export const VIDEO_REFRESH_PERIOD_SECONDS = 600000; // 10 minutes
+export const VIDEO_REFRESH_PERIOD_SECONDS = 300000; // 5 minutes
 
 export const RIGHT_PADDING_FOR_CONTROLLERS = 25;
 

@@ -121,7 +121,7 @@ const sortHashtagToConfidenceScoreMetadatas = (currentScoresMetadatas, list_limi
 
 /**
  * Uploads the top confidence scores to the DynamoDB backend.
- * @returns {Promise<void>}
+ * @returns {Promise<{user_id: (*)}>}
  */
 export const uploadHashtagConfidenceScores = async () => {
   try {
@@ -129,13 +129,11 @@ export const uploadHashtagConfidenceScores = async () => {
     const now = Date.now();
 
     if (lastUploadHashtagTimestamp && now - lastUploadHashtagTimestamp > BACKUP_USER_DATA_INTERVAL_MS) {
-      return;
+      return {};
     }
 
     const uuid = await getUUIDCache();
-    const payload = {
-      "user_id": uuid
-    };
+    const payload = {};
     for (const video_feed_type of Object.values(VideoFeedType)) {
       const currentScoresMetadatas = await getHashtagConfidenceScoreMetadatasCache(video_feed_type);
       payload[video_feed_type] = {};
@@ -144,11 +142,12 @@ export const uploadHashtagConfidenceScores = async () => {
 
       if (Object.keys(payload[video_feed_type][HASHTAG_CONFIDENCE_SCORES_KEY]).length === 0) {
         console.debug("No hashtag confidence scores to upload.");
-        return;
+        return {};
       }
     }
-    await updateUserData(payload);
+    console.debug("Uploading hashtag confidence scores:", payload);
     await setLastUploadHashtagTimestamp(now);
+    return payload;
   } catch (error) {
     console.error("Failed to upload hashtag confidence scores:", error);
   }

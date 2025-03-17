@@ -52,6 +52,7 @@ const VideoProvider = ({children, video_feed_type}) => {
     const cachedCurrentVideoMetadatas = await getVideoMetadatasCache(video_feed_type);
     const cachedIndex = await getVideoIndexIdealStateCache(video_feed_type);
     const startingVideoIndexIdealState = cachedIndex + 1;
+    console.log("cachedCurrentVideoMetadatas", cachedCurrentVideoMetadatas, "cachedIndex", cachedIndex, "startingVideoIndexIdealState", startingVideoIndexIdealState);
     if (cachedCurrentVideoMetadatas) {
       const shrunkenVideoMetadatas = cachedCurrentVideoMetadatas.slice(startingVideoIndexIdealState, cachedCurrentVideoMetadatas.length);
       setVideoMetadatas(shrunkenVideoMetadatas);
@@ -59,10 +60,10 @@ const VideoProvider = ({children, video_feed_type}) => {
       setVideoMetadatasCache(video_feed_type, shrunkenVideoMetadatas);
 
       if (shrunkenVideoMetadatas.length < NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE) {
-        await fetchNewVideosOnEndReached();
+        await fetchNewVideos();
       }
     } else {
-      await fetchNewVideosOnEndReached();
+      await fetchNewVideos();
     }
     await setCheckedCache(true);
   }
@@ -86,9 +87,13 @@ const VideoProvider = ({children, video_feed_type}) => {
       setLastTimeRefreshed(new Date());
     } else {
       setTimeout(() => setRefreshing(false), 1000);
-      const minutes = Math.floor((VIDEO_REFRESH_PERIOD_SECONDS - (new Date() - lastTimeRefreshed)) / 60000);
-      setTemporaryWarning(`Wait ${minutes} minutes before refreshing again`);
-      setTimeout(() => setTemporaryWarning(""), 2000);
+      if (isManual) {
+        console.debug("Manual refresh too soon");
+        const minutes = Math.floor((VIDEO_REFRESH_PERIOD_SECONDS - (new Date() - lastTimeRefreshed)) / 60000);
+        setTemporaryWarning(`Wait ${minutes} minutes before refreshing again`);
+        setTimeout(() => setTemporaryWarning(""), 2000);
+      }
+      console.debug("Automatic refresh too soon");
       return;
     }
 
@@ -137,77 +142,15 @@ const VideoProvider = ({children, video_feed_type}) => {
     setRefreshing(false);
   };
 
-  const fetchNewVideosManually = async () => {
-    setError("");
-    setRefreshing(true);
-
-    if (!lastTimeRefreshed || (new Date() - lastTimeRefreshed) > VIDEO_REFRESH_PERIOD_SECONDS) {
-      setLastTimeRefreshed(new Date());
-    }else{
-      // wait n seconds before refreshing again
-      setTimeout(() => {
-        setRefreshing(false);
-      }, 1000);
-      const minutes = Math.floor((VIDEO_REFRESH_PERIOD_SECONDS - (new Date() - lastTimeRefreshed)) / 60000);
-      setTemporaryWarning("Wait " + minutes + " minutes before refreshing again");
-      setTimeout(() => {
-        setTemporaryWarning("");
-      }, 2000);
-      return;
-    }
-
-
-    let videoMetadataBatch = [];
-    try {
-      const fetchFeedWithBackoff = backoff(fetchFeed, 2, 1000, 10000); // Create backoff function
-      const response = await fetchFeedWithBackoff({
-        video_feed_type: video_feed_type,
-        user_id: await getUUIDCache(),
-        limit: NUM_VIDEOS_TO_REQUEST,
-      })
-
-      if (!("video_feed" in response) || !Array.isArray(response["video_feed"]) || response["video_feed"].length === 0) {
-        setRefreshing(false);
-        return;
-      }
-      videoMetadataBatch = response["video_feed"].map(videoRawMetadata => new VideoMetadata(videoRawMetadata));
-    } catch (err) {
-      console.error('Error fetching videos:', err);
-      setError(err.message, error.status);
-    }
-
-    console.log("videoMetadataBatch", videoMetadataBatch);
-    const unSeenVideoMetadatasBatch = await keepUnSeenVideoMetadatas(videoMetadataBatch);;
-    if (unSeenVideoMetadatasBatch.length !== videoMetadataBatch.length) {
-      console.warn("Some videos were already seen, removing them from the batch. videoMetadataBatch", videoMetadataBatch.length, "unSeenVideoMetadatasBatch", unSeenVideoMetadatasBatch.length);
-    }
-
-    if (unSeenVideoMetadatasBatch.length === 0) {
-      setError("No new videos found");
-      setRefreshing(false);
-      return;
-    }
-
-    console.log("unSeenVideoMetadatasBatch", unSeenVideoMetadatasBatch);
-    await setVideoMetadatas(unSeenVideoMetadatasBatch);
-    await triggerVideoIndex(0, true, "fetchNewVideosManually");
-
-    // Update cache
-    await setVideoMetadatasCache(video_feed_type, videoMetadatas);
-    await updateSeenVideoMetadatasCache(video_feed_type, unSeenVideoMetadatasBatch);
-
-    setRefreshing(false);
-  }
-
 
   useEffect(() => {
     let retryFetch;
 
-    if (videoMetadatas.length === 0 && reAttemptFetchingFeedInterval < MAX_REATTEMPT_FETCHING_FEED_INTERVAL) {
+    if (checkedCache && videoMetadatas.length === 0 && reAttemptFetchingFeedInterval < MAX_REATTEMPT_FETCHING_FEED_INTERVAL) {
       console.log(`Retrying fetch in ${reAttemptFetchingFeedInterval}ms`);
 
       retryFetch = setTimeout(async () => {
-        await fetchNewVideosManually();
+        await fetchNewVideos(true);
         setreAttemptFetchingFeedInterval(Math.min(reAttemptFetchingFeedInterval * 2, MAX_REATTEMPT_FETCHING_FEED_INTERVAL));
       }, reAttemptFetchingFeedInterval);
     }
@@ -228,74 +171,6 @@ const VideoProvider = ({children, video_feed_type}) => {
 
     return () => clearTimeout(timeout); // Cleanup function to avoid memory leaks
   }, [videoError]);
-
-  // Fetch new videos, avoiding previously seen IDs
-  const fetchNewVideosOnEndReached = async (setRefreshingVariable = true) => {
-    console.log("fetchNewVideosOnEndReached:: ", setRefreshingVariable, "videoMetadatas", videoMetadatas.length, "videoIndexExternalView", videoIndexExternalView);
-    setError("");
-    if (setRefreshingVariable) { // in the case of automatic refresh, we don't want to show the spinner
-      setRefreshing(true);
-    }
-
-    if (!lastTimeRefreshed || (new Date() - lastTimeRefreshed) > VIDEO_REFRESH_PERIOD_SECONDS) {
-      setLastTimeRefreshed(new Date());
-    }else{
-      // wait n seconds before refreshing again
-      setTimeout(() => {
-        setRefreshing(false);
-      }, 1000);
-      const minutes = Math.floor((VIDEO_REFRESH_PERIOD_SECONDS - (new Date() - lastTimeRefreshed)) / 60000);
-      setTemporaryWarning("Wait " + minutes + " minutes before refreshing again");
-      setTimeout(() => {
-        setTemporaryWarning("");
-      }, 2000);
-      return;
-    }
-
-    let videoMetadataBatch = [];
-    try {
-      const fetchFeedWithBackoff = backoff(fetchFeed, 2, 1000, 10000); // Create backoff function
-      const response = await fetchFeedWithBackoff({
-        video_feed_type: video_feed_type,
-        user_id: await getUUIDCache(),
-        limit: NUM_VIDEOS_TO_REQUEST,
-      });
-
-      if (!("video_feed" in response) || !Array.isArray(response["video_feed"]) || response["video_feed"].length === 0) {
-        setRefreshing(false);
-        return;
-      }
-      videoMetadataBatch = response["video_feed"].map(videoRawMetadata => new VideoMetadata(videoRawMetadata));
-    } catch (err) {
-      console.error('Error fetching videos:', err);
-      // show stack trace
-      setError(err.message);
-    }
-
-    const unSeenVideoMetadatasBatch = await keepUnSeenVideoMetadatas(videoMetadataBatch);
-    if (unSeenVideoMetadatasBatch.length !== videoMetadataBatch.length) {
-      console.warn("Some videos were already seen, removing them from the batch. videoMetadataBatch", videoMetadataBatch.length, "unSeenVideoMetadatasBatch", unSeenVideoMetadatasBatch.length);
-    }
-
-    if (unSeenVideoMetadatasBatch.length === 0) {
-      setRefreshing(false);
-      setError("No new videos found");
-      return;
-    }
-
-    // Remove older videos to keep the list manageable
-    const updatedVideoMetadatas = [...videoMetadatas, ...unSeenVideoMetadatasBatch];
-    // Update state
-    await setVideoMetadatas(updatedVideoMetadatas);
-
-    await triggerVideoIndex(videoIndexExternalView, true, "fetchNewVideosOnEndReached");
-
-    // Update cache
-    await setVideoMetadatasCache(video_feed_type, updatedVideoMetadatas);
-    await updateSeenVideoMetadatasCache(video_feed_type, videoMetadataBatch);
-
-    setRefreshing(false);
-  };
 
   // Set the current index
   const triggerVideoIndex = async (index, scrollList = true, caller = "none", animated = false) => {
@@ -380,6 +255,15 @@ const VideoProvider = ({children, video_feed_type}) => {
     }
   }
 
+  if (!checkedCache) {
+    return (
+        <View style={{justifyContent: "center", alignItems: "center", top: 150 }}>
+          <ActivityIndicator size="large" color="yellow" />
+          <Text style={{ marginTop: 20, color: "white" }}>Loading videos</Text>
+        </View>
+    );
+  }
+
   if (videoMetadatas.length === 0) {
     return (
         <View style={{justifyContent: "center", alignItems: "center", top: 150 }}>
@@ -418,8 +302,7 @@ const VideoProvider = ({children, video_feed_type}) => {
         videoSlideVideoRefs,
         viewabilityConfig,
         onViewableItemsChanged,
-        fetchNewVideosOnEndReached,
-        fetchNewVideosManually,
+        fetchNewVideos,
         video_feed_type
       }}>
         {children}

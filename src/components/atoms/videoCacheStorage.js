@@ -6,7 +6,8 @@ import {
     SEEN_VIDEO_METADATAS_LIMIT,
     LAST_CONFIDENCE_SCORE_DECAY_UPDATE_TIMESTAMP_KEY,
     HASHTAG_CONFIDENCE_SCORES_KEY,
-    LAST_UPLOAD_HASHTAG_CONFIDENCE_SCORE_TIMESTAMP_KEY, LAST_LOGIN_UPDATE_TIMESTAMP_KEY
+    LAST_UPLOAD_HASHTAG_CONFIDENCE_SCORE_TIMESTAMP_KEY,
+    LAST_LOGIN_UPDATE_TIMESTAMP_KEY, SEEN_VIDEO_IDS_CHECKSUM_UPDATE_TIMESTAMP_KEY
 } from './constants';
 import {VideoMetadata} from './VideoMetadata';
 import {generateUUID} from './utilities';
@@ -76,7 +77,6 @@ export const getAndSetVideoScreenTutorialSeenCache = async () => {
     if (!seen) {
         await cacheData('videoScreenTutorialSeen', true);
     }
-    console.log('seen', seen);
     return seen;
 }
 
@@ -122,3 +122,10 @@ export const setLastLoginUpdateTimestamp = async (timestamp) => {
     await cacheData(LAST_LOGIN_UPDATE_TIMESTAMP_KEY, timestamp);
 }
 
+export const getSeenVideoIdsChecksumUpdateTimestamp = async () => {
+    return await retrieveCachedData(SEEN_VIDEO_IDS_CHECKSUM_UPDATE_TIMESTAMP_KEY, null);
+}
+
+export const setSeenVideoIdsChecksumUpdateTimestamp = async (timestamp) => {
+    await cacheData(SEEN_VIDEO_IDS_CHECKSUM_UPDATE_TIMESTAMP_KEY, timestamp);
+}

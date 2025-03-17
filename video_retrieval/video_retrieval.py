@@ -1,10 +1,13 @@
 import click
 import os
+import random
 import requests
 from datetime import datetime
 import subprocess
 import json
+import traceback
 import backoff
+import time
 
 # Constants for API URLs
 S3_API_URL = "https://o28an1f9e8.execute-api.us-east-2.amazonaws.com/prod"
@@ -30,8 +33,10 @@ def open_chrome_and_copy_text(url):
         tell application "Google Chrome"
             activate
             open location "{url}"
-            delay 2 -- Wait for the page to load
-            set pageContent to execute front window's active tab javascript "document.body.innerText"
+            delay 5 -- Increased delay to allow page load
+            tell front window's active tab
+                set pageContent to execute javascript "document.documentElement.innerText"
+            end tell
             return pageContent
         end tell
     """
@@ -76,44 +81,102 @@ def crop_video(file_path):
     x_offset = (width - crop_width) // 2
     y_offset = (height - crop_height) // 2
 
-    output_path = file_path.replace(".mp4", "_cropped.mp4")
-
     cmd = [
         "ffmpeg",
         "-i", file_path,
         "-vf", f"crop={crop_width}:{crop_height}:{x_offset}:{y_offset}",
         "-c:v", "libx264",
         "-preset", "slower",
-        "-crf", "25",
+        "-crf", "18",
         "-c:a", "aac",
         "-b:a", "192k",
         "-movflags", "+faststart",
-        output_path,
+        file_path,
         "-y",
     ]
     subprocess.run(cmd, check=True)
-    return output_path
+    return file_path
+
+def reset_download_folder():
+    """Deletes and recreates the TikTok raw download folder."""
+    raw_download_folder = os.path.expanduser("~/Downloads/tiktok_downloads_raw")
+    if os.path.exists(raw_download_folder):
+        subprocess.run(["rm", "-rf", raw_download_folder])  # Delete existing folder
+    os.makedirs(raw_download_folder, exist_ok=True)  # Recreate it
 
 
-@backoff.on_exception(backoff.constant, Exception, interval=60, max_tries=3)
+def wait_for_download(timeout=10):
+    """
+    Waits for the first video file to appear in the TikTok raw download folder.
+    Returns the full file path of the downloaded video.
+    """
+    raw_download_folder = os.path.expanduser("~/Downloads/tiktok_downloads_raw")
+
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        files = sorted(
+            (os.path.join(raw_download_folder, f) for f in os.listdir(raw_download_folder)),
+            key=os.path.getmtime,
+            reverse=True  # Sort so newest file appears first
+        )
+        if files:
+            return files[0]  # Return the first (newest) file found
+
+        time.sleep(1)  # Wait before checking again
+        print(f"Waiting for download... {time.time() - start_time:.0f} seconds elapsed")
+
+    raise FileNotFoundError(f"Download failed: No files found in {raw_download_folder} after {timeout} seconds.")
+
+
+@backoff.on_exception(backoff.expo, Exception, max_tries=3)
 def download_video_ssstik(video_info, save_folder):
+    """
+    Download a video from ssstik using Chrome, then move it to the final save path.
+    Retries up to 3 times with exponential backoff.
+    """
+    video_id = video_info["id"]
+    request_url = f"https://tikcdn.io/ssstik/{video_id}"
+
+    # Construct the save folder path
+    date = datetime.now().strftime("%Y-%m-%d")
+    save_folder = os.path.expanduser(f"~/Documents/tiktok/{date}/{save_folder}")
+    os.makedirs(save_folder, exist_ok=True)
+
+    save_path = os.path.join(save_folder, f"{video_id}.mp4")
+
+    print(f"Resetting download folder...")
+    reset_download_folder()  # Delete and recreate TikTok raw folder
+
+    print(f"Downloading video from {request_url} using Chrome...")
+    open_chrome_and_copy_text(request_url)
+
+    print(f"Waiting for the download to complete...")
+    downloaded_file_path = wait_for_download(timeout=20)
+
+    print(f"Moving downloaded video to {save_path}...")
+    os.rename(downloaded_file_path, save_path)  # Move file to final save path
+
+    print(f"✅ Download completed: {save_path}")
+    return save_path
+
+@backoff.on_exception(backoff.expo, Exception, factor=180, max_tries=3)
+def _old_download_video_ssstik(video_info, save_folder):
     """
     Download a video from ssstik and ensure the file exists after downloading.
     Retries up to 3 times with a 60-second wait between each attempt.
     """
     id = video_info["id"]
-    username = video_info["author"]["uniqueId"]
 
     request_url = f"https://tikcdn.io/ssstik/{id}"
-
     # Construct the save folder path
     date = datetime.now().strftime("%Y-%m-%d")
     save_folder = os.path.expanduser(f"~/Documents/tiktok/{date}/{save_folder}")
     create_directory(save_folder)
 
-    # Construct the save path
+    # # Construct the save path
     save_path = os.path.join(save_folder, f"{id}.mp4")
     print(f"Downloading video from {request_url} to {save_path}")
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36"
     }
@@ -127,10 +190,12 @@ def download_video_ssstik(video_info, save_folder):
 
     # Check if the file exists and raise an exception if it does not
     if not os.path.exists(save_path):
+        print(f"Download failed: {save_path} does not exist.")
         raise FileNotFoundError(f"Download failed: {save_path} does not exist.")
 
     # Check if the file is empty
     if os.path.getsize(save_path) == 0:
+        print(f"Download failed: {save_path} is empty (0 bytes).")
         raise ValueError(f"Download failed: {save_path} is empty (0 bytes).")
 
     return save_path
@@ -142,16 +207,15 @@ def get_videos_by_hashtags(hashtags):
 
     base_url = "https://www.tiktok.com/api/search/general/full/?WebIdLastTime=1714615161&aid=1988&app_language=en&app_name=tiktok_web&browser_language=en-US&browser_name=Mozilla&browser_online=true&browser_platform=MacIntel&browser_version=5.0%20%28Macintosh%3B%20Intel%20Mac%20OS%20X%2010_15_7%29%20AppleWebKit%2F537.36%20%28KHTML%2C%20like%20Gecko%29%20Chrome%2F131.0.0.0%20Safari%2F537.36&channel=tiktok_web&cookie_enabled=true&data_collection_enabled=true&device_id=7364215944284522026&device_platform=web_pc&device_type=web_h264&focus_state=true&from_page=search&history_len=5&is_fullscreen=false&is_page_visible=true&keyword={keyword}&odinId=6954213178439959557&offset=0&os=mac&priority_region=US&referer=&region=US&root_referer=https%3A%2F%2Fwww.google.com%2F&screen_height=1117&screen_width=1728&search_source=normal_search&tz_name=America%2FLos_Angeles&user_is_login=true&verifyFp=verify_m53p8ikx_KOhUdB6j_lPRa_4r4o_BVtZ_qcLAwGDmc94d&web_search_code=%7B%22tiktok%22%3A%7B%22client_params_x%22%3A%7B%22search_engine%22%3A%7B%22ies_mt_user_live_video_card_use_libra%22%3A1%2C%22mt_search_general_user_live_card%22%3A1%7D%7D%2C%22search_server%22%3A%7B%7D%7D%7D&webcast_language=en&msToken=e3f6V5h6K5R_Ak1M7_YpbE8NR2axbiarlzT9Zaem3M7rn_eV8NW0TGAaXc5AdOB7VqjVAukBONqP-6pSKtDvxJVBLwA2wOs53XBYjyEadKCFHIrz5Z8BSElYDt7yk6ishfDt52b6FeBUAoomLtVo4_WK&X-Bogus=DFSzswVOrLvAN9Wkt8fhpfLNKBTT&_signature=_02B4Z6wo00001XTdU-QAAIDCJiJz.uY7IL103VdAADpL82"
 
-    all_results = []
-    for hashtag in hashtags:
+    for i, hashtag in enumerate(hashtags):
+        if i > 0:
+            time.sleep(random.randint(30, 60))
         # Replace the placeholder with the current hashtag
         url = base_url.replace("{keyword}", hashtag)
         print(f"Fetching videos {url}")
         response = open_chrome_and_copy_text(url)
-        all_results.extend(json.loads(response)["data"])
+        yield json.loads(response)["data"]
 
-
-    return all_results
 
 # Function to fetch trending videos
 def fetch_trending_videos():
@@ -167,7 +231,9 @@ def fetch_trending_videos():
     if result.returncode != 0:
         raise Exception(f"Error fetching trending videos: {result.stderr}")
 
-    return json.loads(result.stdout)["itemList"]
+    video_list = json.loads(result.stdout)["itemList"]
+    random.shuffle(video_list)
+    return video_list
 
 # Function to get a presigned URL for uploading to S3
 def get_presigned_url(file_name, content_type):
@@ -228,21 +294,27 @@ def upload_trending_videos(mute_by_default):
         submit_media(file_path, description, hashtags, mute_by_default)
 
 @click.command()
-@click.option("--hashtags", multiple=True, help="List of hashtags to fetch videos for.")
+@click.option("--hashtags", help="List of hashtags to fetch videos for.")
 @click.option("--mute-by-default", is_flag=True, help="Mute videos by default when uploading metadata.")
 def upload_videos_by_hashtags(hashtags, mute_by_default):
+    hashtags = hashtags.split(",")
+    random.shuffle(hashtags)
+    print(f"Fetching videos for hashtags: {hashtags}")
     videos = get_videos_by_hashtags(hashtags)
-    for i, video_info in enumerate(videos):
-        try:
-            video_info = video_info["item"]
-            description = video_info.get("desc", "")
-            hashtags = [tag["hashtagName"] for tag in video_info.get("textExtra", []) if "hashtagName" in tag]
-            print(f"{description=}, {hashtags=}")
-            file_path = download_video_ssstik(video_info, "hashtags")
-            submit_media(file_path, description, hashtags, mute_by_default)
-        except Exception as e:
-            print(f"Completed {i} videos, error: {e}")
-            break
+    for hashtag_videos in videos:
+        for video_info in hashtag_videos:
+            try:
+                print(f"Processing video {video_info['item']['id']}")
+                video_info = video_info["item"]
+                description = video_info.get("desc", "")
+                hashtags = [tag["hashtagName"] for tag in video_info.get("textExtra", []) if "hashtagName" in tag]
+                print(f"{description=}, {hashtags=}")
+                file_path = download_video_ssstik(video_info, "hashtags")
+                submit_media(file_path, description, hashtags, mute_by_default)
+            except Exception as e:
+                print(f"Skip video {e}")
+                traceback.print_exc()
+                continue
 
 cli.add_command(upload_trending_videos)
 cli.add_command(upload_videos_by_hashtags)
