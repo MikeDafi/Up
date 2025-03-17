@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useRef, useMemo, useState } from 'react';
 import { Animated, Dimensions, Easing, StyleSheet, Text, View, TouchableWithoutFeedback, ScrollView } from 'react-native';
-import { VideoContext } from "./VideoProvider";
+import { VideoContext } from '../atoms/contexts';
 
 const windowWidth = Dimensions.get('window').width;
 const BASE_WIDTH = 55; // Base width for initial padding or margins
@@ -13,8 +13,12 @@ const VideoDescriptionSlide = () => {
   const [isExpanded, setIsExpanded] = useState(false); // State to toggle between expanded and sliding view
 
   const description = useMemo(() => {
-    if (videoMetadatas.length === 0) return '';
-    return videoMetadatas[videoIndexExternalView].description || '';
+    if (!Array.isArray(videoMetadatas) || videoMetadatas.length === 0) return '';
+
+    const videoMetadata = videoMetadatas[videoIndexExternalView];
+    if (!videoMetadata) return ''; // Prevent accessing undefined
+
+    return videoMetadata.description || '';
   }, [videoMetadatas, videoIndexExternalView]);
 
   useEffect(() => {

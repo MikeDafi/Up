@@ -1,12 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-    SEEN_VIDEO_IDS_KEY,
+    SEEN_VIDEO_METADATAS_KEY,
     CURRENT_VIDEO_INDEX_KEY,
     CURRENT_VIDEO_PATHS_KEY,
-    SEEN_VIDEO_IDS_LIMIT,
+    SEEN_VIDEO_METADATAS_LIMIT,
     LAST_CONFIDENCE_SCORE_DECAY_UPDATE_TIMESTAMP_KEY,
     HASHTAG_CONFIDENCE_SCORES_KEY,
-    LAST_UPLOAD_HASHTAG_CONFIDENCE_SCORE_TIMESTAMP_KEY, LAST_LOGIN_UPDATE_TIMESTAMP_KEY
+    LAST_UPLOAD_HASHTAG_CONFIDENCE_SCORE_TIMESTAMP_KEY,
+    LAST_LOGIN_UPDATE_TIMESTAMP_KEY, SEEN_VIDEO_IDS_CHECKSUM_UPDATE_TIMESTAMP_KEY
 } from './constants';
 import {VideoMetadata} from './VideoMetadata';
 import {generateUUID} from './utilities';
@@ -32,15 +33,23 @@ export const retrieveCachedData = async (key, fallback = null) => {
     }
 };
 
-export const updateSeenVideoMetadatasCache = async (video_feed_type, newIds) => {
-    const currentIds = (await retrieveCachedData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, [])) || [];
-    const updatedIds = [...newIds, ...currentIds].slice(0, SEEN_VIDEO_IDS_LIMIT);
-    await cacheData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, updatedIds);
+export const updateSeenVideoMetadatasCache = async (video_feed_type, new_video_metadatas) => {
+    const currentIds = (await retrieveCachedData(`${SEEN_VIDEO_METADATAS_KEY}`, [])) || [];
+
+    // Maintain unique IDs while preserving order (newer ones first)
+    const idSet = new Set();
+    const updatedIds = [...new_video_metadatas, ...currentIds].filter(videoMetadata => {
+        if (idSet.has(videoMetadata.videoId)) return false; // Skip duplicates
+        idSet.add(videoMetadata.videoId);
+        return true;
+    }).slice(0, SEEN_VIDEO_METADATAS_LIMIT); // Enforce limit
+
+    await cacheData(`${SEEN_VIDEO_METADATAS_KEY}`, updatedIds);
 };
 
-export const getSeenVideoMetadatasCache = async (video_feed_type) => {
-    return await retrieveCachedData(`${video_feed_type}/${SEEN_VIDEO_IDS_KEY}`, []);
-}
+export const getSeenVideoMetadatasCache = async () => {
+    return await retrieveCachedData(`${SEEN_VIDEO_METADATAS_KEY}`, []);
+};
 
 export const getVideoIndexIdealStateCache = async (video_feed_type) => {
     return await retrieveCachedData(`${video_feed_type}/${CURRENT_VIDEO_INDEX_KEY}`, 0);
@@ -68,7 +77,6 @@ export const getAndSetVideoScreenTutorialSeenCache = async () => {
     if (!seen) {
         await cacheData('videoScreenTutorialSeen', true);
     }
-    console.log('seen', seen);
     return seen;
 }
 
@@ -82,11 +90,11 @@ export const getUUIDCache = async () => {
     return uuid;
 };
 
-export const getHashtagConfidenceScoresCache = async (video_feed_type) => {
+export const getHashtagConfidenceScoreMetadatasCache = async (video_feed_type) => {
     return await retrieveCachedData(`${video_feed_type}/${HASHTAG_CONFIDENCE_SCORES_KEY}`, {});
 };
 
-export const updateHashtagConfidenceScoresCache = async (video_feed_type,confidenceScores) => {
+export const updateHashtagConfidenceScoreMetadatasCache = async (video_feed_type,confidenceScores) => {
     await cacheData(`${video_feed_type}/${HASHTAG_CONFIDENCE_SCORES_KEY}`, confidenceScores);
 }
 
@@ -114,3 +122,10 @@ export const setLastLoginUpdateTimestamp = async (timestamp) => {
     await cacheData(LAST_LOGIN_UPDATE_TIMESTAMP_KEY, timestamp);
 }
 
+export const getSeenVideoIdsChecksumUpdateTimestamp = async () => {
+    return await retrieveCachedData(SEEN_VIDEO_IDS_CHECKSUM_UPDATE_TIMESTAMP_KEY, null);
+}
+
+export const setSeenVideoIdsChecksumUpdateTimestamp = async (timestamp) => {
+    await cacheData(SEEN_VIDEO_IDS_CHECKSUM_UPDATE_TIMESTAMP_KEY, timestamp);
+}

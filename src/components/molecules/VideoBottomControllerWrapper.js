@@ -1,6 +1,6 @@
 import React, {useContext} from 'react';
 import {StyleSheet, View} from 'react-native';
-import VideoProvider, {VideoContext} from './VideoProvider';
+import {VideoContext} from "../atoms/contexts";
 import VideoSlideController from './VideoSlideController';
 import VideoDescriptionSlide from './VideoDescriptionSlide';
 import VideoProgressBar from "./VideoProgressBar";

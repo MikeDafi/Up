@@ -1,6 +1,6 @@
 import React, { useState, useContext } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { VideoScreenContext } from '../../screens/VideosScreen';
+import { VideoScreenContext } from '../atoms/contexts';
 
 const VideoScreenTutorial = () => {
   const { setVideoScreenTutorialEnabled, videoScreenTutorialEnabled } = useContext(VideoScreenContext);
@@ -20,11 +20,12 @@ const VideoScreenTutorial = () => {
         {tutorialStage === 1 && (
             <>
               <View style={styles.videowaudioFeedContainer}>
-                <Text style={styles.boxText}>Video w/ Audio Feed</Text>
+                <Text style={styles.boxText}>Video Feed w/ Audio</Text>
                 <Text style={styles.subText}>e.g. Music Videos, Podcasts, Interviews, News</Text>
               </View>
               <View style={styles.videofocusedFeedContainer}>
-                <Text style={styles.boxText}>Video Focused Feed</Text>
+                <Text style={styles.boxText}>Video Feed w/o Audio</Text>
+                <Text style={styles.highlightedSubText}>Videos are Muted by default</Text>
                 <Text style={styles.subText}>e.g. Sports Highlights, Timelapses, Art, Scenary, Gameplay</Text>
               </View>
             </>
@@ -89,6 +90,11 @@ const styles = StyleSheet.create({
   },
   subText: {
     color: 'white',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  highlightedSubText: {
+    color: 'gold',
     fontSize: 14,
     textAlign: 'center',
   },

@@ -1,6 +1,6 @@
 import React, {useContext} from 'react';
 import {StyleSheet, View} from 'react-native';
-import {VideoContext} from './VideoProvider';
+import {VideoContext} from "../atoms/contexts";
 import {VideoFeedType} from "../atoms/constants";
 import TutorialButton from "./TutorialButton";
 

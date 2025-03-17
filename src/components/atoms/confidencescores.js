@@ -1,4 +1,4 @@
-import { getHashtagConfidenceScoresCache, updateHashtagConfidenceScoresCache, setLastConfidenceScoreDecayTimestamp, getLastUploadHashtagTimestamp, setLastUploadHashtagTimestamp} from "./videoCacheStorage";
+import { getHashtagConfidenceScoreMetadatasCache, updateHashtagConfidenceScoreMetadatasCache, setLastConfidenceScoreDecayTimestamp, getLastUploadHashtagTimestamp, setLastUploadHashtagTimestamp} from "./videoCacheStorage";
 import {getLastConfidenceScoreDecayTimestamp, getUUIDCache} from "./videoCacheStorage";
 import {updateUserData} from "./dynamodb";
 import {
@@ -36,14 +36,16 @@ const calculateConfidenceScoreUpdate = (interactions) => {
 /**
  * Degrades all confidence scores over time.
  *
- * @param {Object} currentScores - A map of hashtags to confidence scores.
+ * @param {Object} currentScoreMetadatas - A map of hashtags to confidence score metadata
  * @param {number} decayFactor - The percentage to degrade each score (e.g., 0.95 for 5% decay).
  * @returns {Object} - The updated scores after applying the decay.
  */
-const applyScoreDecay = (currentScores, decayFactor = 0.95) => {
+const applyScoreDecay = (currentScoreMetadatas, decayFactor = 0.98) => {
   const updatedScores = {};
-  for (const [hashtag, score] of Object.entries(currentScores)) {
-    updatedScores[hashtag] = Math.max(0, score * decayFactor); // Ensure scores don't drop below 0
+  for (const [hashtag, scoreMetadatas] of Object.entries(currentScoreMetadatas)) {
+    // Decay by number of days since last update
+    const daysSinceLastUpdate = (Date.now() - scoreMetadatas.last_updated) / (24 * 60 * 60 * 1000);
+    updatedScores[hashtag] = Math.max(0, scoreMetadatas.score * Math.pow(decayFactor, daysSinceLastUpdate));
   }
   return updatedScores;
 };
@@ -58,26 +60,20 @@ const applyScoreDecay = (currentScores, decayFactor = 0.95) => {
  * @returns {Promise<void>}
  */
 export const calculateAndUpdateConfidenceScoreCache = async (video_feed_type, hashtags, interactions) => {
-  const currentScores = await getHashtagConfidenceScoresCache(video_feed_type);
+  const currentScoresMetadatas = await getHashtagConfidenceScoreMetadatasCache(video_feed_type);
+  const currentDate = Date.now();
   for (const hashtag of hashtags) {
-    const currentScore = currentScores[hashtag] || 0;
+    const currentScoreMetadata = currentScoresMetadatas[hashtag] || {"score": 0, "last_updated": currentDate};
     const scoreUpdate = calculateConfidenceScoreUpdate(interactions);
-    currentScores[hashtag] = Math.max(0, currentScore + scoreUpdate); // Ensure scores don't go below 0
+    // if score in currentScoresMetadatas is null, set it
+    const currentScore = currentScoreMetadata.score ?? 0;
+    currentScoresMetadatas[hashtag] = {"score": Math.max(0, currentScore + scoreUpdate), "last_updated": currentDate};
   }
 
   // Extract the top confidence scores and update the cache
-  const topScores = Object.entries(currentScores)
-      .filter(([, score]) => !isNaN(score) && score != null)
-      .sort(([, scoreA], [, scoreB]) => scoreB - scoreA)
-      .slice(0, HASHTAG_CONFIDENCE_LOCAL_CACHE_SIZE_LIMIT)
-      .reduce((acc, [hashtag, score]) => {
-        acc[hashtag] = score;
-        return acc;
-      }, {});
-
+  const topScores = sortHashtagToConfidenceScoreMetadatas(currentScoresMetadatas, HASHTAG_CONFIDENCE_LOCAL_CACHE_SIZE_LIMIT);
   try {
-    await updateHashtagConfidenceScoresCache(video_feed_type, topScores);
-    console.log("getHashtagConfidenceScoresCache", video_feed_type, await getHashtagConfidenceScoresCache(video_feed_type));
+    await updateHashtagConfidenceScoreMetadatasCache(video_feed_type, topScores);
   } catch (error) {
     console.error(`Failed to update confidence score for hashtag "${hashtag}":`, error);
     return;
@@ -97,9 +93,9 @@ export const applyDecayToAllConfidenceScores = async () => {
 
     if (!lastDecayTimestamp || now - lastDecayTimestamp > APPLY_DECAY_INTERVAL_MS) {
       for (const video_feed_type of Object.values(VideoFeedType)) {
-        const currentScores = await getHashtagConfidenceScoresCache(video_feed_type);
-        const updatedScores = applyScoreDecay(currentScores);
-        await updateHashtagConfidenceScoresCache(video_feed_type, updatedScores);
+        const currentScoreMetadatas = await getHashtagConfidenceScoreMetadatasCache(video_feed_type);
+        const updatedScoreMetadatas = applyScoreDecay(currentScoreMetadatas);
+        await updateHashtagConfidenceScoreMetadatasCache(video_feed_type, updatedScoreMetadatas);
         await setLastConfidenceScoreDecayTimestamp(now);
         }
     }
@@ -107,43 +103,51 @@ export const applyDecayToAllConfidenceScores = async () => {
     console.error('Failed to apply decay to all confidence scores:', error);
   }
 };
+
+/**
+ * Sorts hashtags by confidence score and returns the top scores. Optionally, only hashtag to score mapping can be returned.
+ */
+const sortHashtagToConfidenceScoreMetadatas = (currentScoresMetadatas, list_limit, keepScoresOnly=false) => {
+  return  Object.entries(currentScoresMetadatas)
+      .filter(([, scoreMetadatas]) => scoreMetadatas != null && !isNaN(scoreMetadatas.score))
+      .sort(([, scoreMetadataA], [, scoreMetadataB]) => scoreMetadataB.score - scoreMetadataA.score)
+      .slice(0, list_limit)
+      .reduce((acc, [hashtag, scoreMetadata]) => {
+        acc[hashtag] = keepScoresOnly ? scoreMetadata.score : scoreMetadata;
+        return acc;
+      }, {});
+};
+
+
 /**
  * Uploads the top confidence scores to the DynamoDB backend.
- * @returns {Promise<void>}
+ * @returns {Promise<{user_id: (*)}>}
  */
 export const uploadHashtagConfidenceScores = async () => {
   try {
     const lastUploadHashtagTimestamp = await getLastUploadHashtagTimestamp();
     const now = Date.now();
 
-    // if (lastUploadHashtagTimestamp && now - lastUploadHashtagTimestamp > BACKUP_USER_DATA_INTERVAL_MS) {
-    //   return;
-    // }
+    if (lastUploadHashtagTimestamp && now - lastUploadHashtagTimestamp > BACKUP_USER_DATA_INTERVAL_MS) {
+      return {};
+    }
 
     const uuid = await getUUIDCache();
-    const payload = {
-      "user_id": uuid
-    };
+    const payload = {};
     for (const video_feed_type of Object.values(VideoFeedType)) {
-      const confidenceScores = await getHashtagConfidenceScoresCache(video_feed_type);
+      const currentScoresMetadatas = await getHashtagConfidenceScoreMetadatasCache(video_feed_type);
       payload[video_feed_type] = {};
 
-      // Extract top HASHTAG_CONFIDENCE_UPLOAD_SIZE_LIMIT hashtags with their confidence scores
-      payload[video_feed_type][HASHTAG_CONFIDENCE_SCORES_KEY] = Object.entries(confidenceScores)
-          .sort(([, scoreA], [, scoreB]) => scoreB - scoreA)
-          .slice(0, HASHTAG_CONFIDENCE_UPLOAD_SIZE_LIMIT)
-          .reduce((acc, [hashtag, score]) => {
-            acc[hashtag] = score;
-            return acc;
-          }, {});
+      payload[video_feed_type][HASHTAG_CONFIDENCE_SCORES_KEY] = sortHashtagToConfidenceScoreMetadatas(currentScoresMetadatas, HASHTAG_CONFIDENCE_UPLOAD_SIZE_LIMIT, true);
 
       if (Object.keys(payload[video_feed_type][HASHTAG_CONFIDENCE_SCORES_KEY]).length === 0) {
         console.debug("No hashtag confidence scores to upload.");
-        return;
+        return {};
       }
     }
-    await updateUserData(payload);
+    console.debug("Uploading hashtag confidence scores:", payload);
     await setLastUploadHashtagTimestamp(now);
+    return payload;
   } catch (error) {
     console.error("Failed to upload hashtag confidence scores:", error);
   }

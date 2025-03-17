@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { StyleSheet, TouchableOpacity, Text, View } from 'react-native';
-import { VideoScreenContext } from '../../screens/VideosScreen';
+import { VideoScreenContext } from '../atoms/contexts';
 
 const TutorialButton = () => {
   const {setVideoScreenTutorialEnabled } = useContext(VideoScreenContext);

@@ -47,13 +47,13 @@ export const fetchFeed = async (payload) => {
       },
       body: JSON.stringify(payload), // Directly use the provided dictionary
     });
-    const processedResponse = await handleResponse(response, "Failed to fetch video feed");
+    const processedResponse = await handleResponse(response, "Video feed");
     const data = await processedResponse.json();
     return data;
   } catch (error) {
     if (error.message.includes("Too many new feed requests")) {
-      console.warn('Failed to fetch feed:', error.message);
-      return error.message;
+      console.warn('Too many new feed requests', error.message);
+      return error;
     }
     console.error('Error fetching feed:', error.message);
     throw error; // Re-throw to allow the caller to handle it

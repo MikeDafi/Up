@@ -4,8 +4,8 @@ import CameraScreen from "./src/screens/CameraScreen";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Image, StyleSheet } from 'react-native';
-import {applyDecayToAllConfidenceScores, uploadHashtagConfidenceScores} from "./src/components/atoms/confidencescores";
-import {updateLastLoginTimestamp} from "./src/components/atoms/user_functions";
+import {applyDecayToAllConfidenceScores} from "./src/components/atoms/confidencescores";
+import {aggregateUpdateUserData} from "./src/components/atoms/user_functions";
 
 const Tab = createBottomTabNavigator();
 
@@ -17,11 +17,7 @@ export default function App() {
         // Apply decay to all confidence scores
         await applyDecayToAllConfidenceScores();
 
-        // Upload last login timestamp();
-        await updateLastLoginTimestamp();
-
-        // Upload hashtag confidence scores periodically
-        await uploadHashtagConfidenceScores();
+        await aggregateUpdateUserData();
       } catch (error) {
         console.error('Error during initialization:', error);
       }
