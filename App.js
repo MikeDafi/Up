@@ -1,39 +1,54 @@
-import React, {useEffect} from 'react';
+import React, { useState, useEffect } from 'react';
 import VideosScreen from "./src/screens/VideosScreen";
 import CameraScreen from "./src/screens/CameraScreen";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { Image, StyleSheet } from 'react-native';
-import {applyDecayToAllConfidenceScores} from "./src/components/atoms/confidencescores";
-import {aggregateUpdateUserData} from "./src/components/atoms/user_functions";
+import { Image, StyleSheet, View, Text } from 'react-native';
+import { applyDecayToAllConfidenceScores } from "./src/components/atoms/confidencescores";
+import { aggregateUpdateUserData } from "./src/components/atoms/user_functions";
+import { isTrustedDevice } from "./src/components/atoms/attestation";
 
 const Tab = createBottomTabNavigator();
 
 export default function App() {
+  const [trusted, setTrusted] = useState(null); // null: loading, false: blocked, true: continue
 
   useEffect(() => {
-    const initialize = async () => {
-      try {
-        // Apply decay to all confidence scores
-        await applyDecayToAllConfidenceScores();
+    const checkDeviceTrust = async () => {
+      const trusted = await isTrustedDevice();
+      setTrusted(trusted);
 
-        await aggregateUpdateUserData();
-      } catch (error) {
-        console.error('Error during initialization:', error);
+      if (trusted) {
+        try {
+          await applyDecayToAllConfidenceScores();
+          await aggregateUpdateUserData();
+        } catch (error) {
+          console.error('Error during initialization:', error);
+        }
       }
     };
 
-    // Call the async function
-    initialize();
+    checkDeviceTrust();
   }, []);
 
+  if (trusted === null) {
+    return null; // or splash screen / loading indicator
+  }
+
+  if (!trusted) {
+    return (
+        <View style={styles.blocked}>
+          <Text style={styles.blockedText}>⚠️ Device not supported.</Text>
+        </View>
+    );
+  }
 
   return (
       <NavigationContainer>
         <Tab.Navigator
             screenOptions={{
-              tabBarStyle: styles.tabBarStyle, // Reduce tab bar height
-              tabBarIconStyle: styles.tabBarIconStyle, // Adjust icon size (optional)
+              tabBarStyle: styles.tabBarStyle,
+              tabBarIconStyle: styles.tabBarIconStyle,
             }}
         >
           <Tab.Screen
@@ -41,7 +56,7 @@ export default function App() {
               component={VideosScreen}
               options={{
                 headerShown: false,
-                tabBarIcon: ({ color, size }) => (
+                tabBarIcon: ({ color }) => (
                     <Image
                         source={require('@assets/icons/tab_bar/two_way.png')}
                         style={[styles.icon, { tintColor: color }]}
@@ -54,7 +69,7 @@ export default function App() {
               component={CameraScreen}
               options={{
                 headerShown: false,
-                tabBarIcon: ({ color, size }) => (
+                tabBarIcon: ({ color }) => (
                     <Image
                         source={require('@assets/icons/tab_bar/upload.png')}
                         style={[styles.icon, { tintColor: color }]}
@@ -69,16 +84,26 @@ export default function App() {
 
 const styles = StyleSheet.create({
   tabBarStyle: {
-    height: 68, // Reduce the height of the tab bar
-    backgroundColor: 'white', // Optional: Set a background color
-    borderTopWidth: 0.5, // Optional: Add a border to the top
-    borderTopColor: '#ccc', // Optional: Border color
+    height: 68,
+    backgroundColor: 'white',
+    borderTopWidth: 0.5,
+    borderTopColor: '#ccc',
   },
   tabBarIconStyle: {
-    marginTop: 5, // Adjust icon alignment within the smaller tab bar
+    marginTop: 5,
   },
   icon: {
-    width: 24, // Adjust icon size
+    width: 24,
     height: 24,
   },
-})
+  blocked: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  blockedText: {
+    fontSize: 18,
+    color: '#444',
+  },
+});
