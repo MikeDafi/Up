@@ -56,6 +56,8 @@ def open_chrome_and_copy_text(url):
 
 # Function to crop video
 def crop_video(file_path):
+    import tempfile
+    
     cmd = [
         "ffprobe",
         "-v", "error",
@@ -81,51 +83,80 @@ def crop_video(file_path):
     x_offset = (width - crop_width) // 2
     y_offset = (height - crop_height) // 2
 
-    cmd = [
-        "ffmpeg",
-        "-i", file_path,
-        "-vf", f"crop={crop_width}:{crop_height}:{x_offset}:{y_offset}",
-        "-c:v", "libx264",
-        "-preset", "slower",
-        "-crf", "18",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-movflags", "+faststart",
-        file_path,
-        "-y",
-    ]
-    subprocess.run(cmd, check=True)
+    # Create a temporary file for the cropped video
+    temp_file = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+    temp_file.close()
+    
+    try:
+        cmd = [
+            "ffmpeg",
+            "-i", file_path,
+            "-vf", f"crop={crop_width}:{crop_height}:{x_offset}:{y_offset}",
+            "-c:v", "libx264",
+            "-preset", "slower",
+            "-crf", "18",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-movflags", "+faststart",
+            temp_file.name,
+            "-y",
+        ]
+        subprocess.run(cmd, check=True)
+        
+        # Replace the original file with the cropped version
+        os.replace(temp_file.name, file_path)
+        
+    except Exception as e:
+        # Clean up temp file if something goes wrong
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
+        raise e
+    
     return file_path
 
-def reset_download_folder():
-    """Deletes and recreates the TikTok raw download folder."""
-    raw_download_folder = os.path.expanduser("~/Downloads/tiktok_downloads_raw")
-    if os.path.exists(raw_download_folder):
-        subprocess.run(["rm", "-rf", raw_download_folder])  # Delete existing folder
-    os.makedirs(raw_download_folder, exist_ok=True)  # Recreate it
-
-
-def wait_for_download(timeout=10):
+def wait_for_download(timeout=20, download_start_time=None):
     """
-    Waits for the first video file to appear in the TikTok raw download folder.
+    Waits for a new video file to appear in the Downloads folder.
     Returns the full file path of the downloaded video.
     """
-    raw_download_folder = os.path.expanduser("~/Downloads/tiktok_downloads_raw")
+    downloads_folder = os.path.expanduser("~/Downloads")
+    
+    if download_start_time is None:
+        download_start_time = time.time()
 
     start_time = time.time()
     while time.time() - start_time < timeout:
-        files = sorted(
-            (os.path.join(raw_download_folder, f) for f in os.listdir(raw_download_folder)),
-            key=os.path.getmtime,
-            reverse=True  # Sort so newest file appears first
-        )
-        if files:
-            return files[0]  # Return the first (newest) file found
+        try:
+            # Get all files in Downloads folder
+            all_files = []
+            for f in os.listdir(downloads_folder):
+                file_path = os.path.join(downloads_folder, f)
+                if os.path.isfile(file_path):
+                    all_files.append(file_path)
+            
+            # Filter for video files created after download start
+            video_files = []
+            for file_path in all_files:
+                file_ext = os.path.splitext(file_path)[1].lower()
+                if file_ext in ['.mp4', '.mov', '.avi', '.mkv']:
+                    file_mtime = os.path.getmtime(file_path)
+                    if file_mtime > download_start_time:
+                        video_files.append((file_path, file_mtime))
+            
+            if video_files:
+                # Sort by modification time (newest first) and return the most recent
+                video_files.sort(key=lambda x: x[1], reverse=True)
+                newest_video = video_files[0][0]
+                print(f"Found new video file: {os.path.basename(newest_video)}")
+                return newest_video
+
+        except (OSError, IOError) as e:
+            print(f"Error checking Downloads folder: {e}")
 
         time.sleep(1)  # Wait before checking again
         print(f"Waiting for download... {time.time() - start_time:.0f} seconds elapsed")
 
-    raise FileNotFoundError(f"Download failed: No files found in {raw_download_folder} after {timeout} seconds.")
+    raise FileNotFoundError(f"Download failed: No new video files found in {downloads_folder} after {timeout} seconds.")
 
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
@@ -144,14 +175,14 @@ def download_video_ssstik(video_info, save_folder):
 
     save_path = os.path.join(save_folder, f"{video_id}.mp4")
 
-    print(f"Resetting download folder...")
-    reset_download_folder()  # Delete and recreate TikTok raw folder
-
+    # Record the time before initiating download
+    download_start_time = time.time()
+    
     print(f"Downloading video from {request_url} using Chrome...")
     open_chrome_and_copy_text(request_url)
 
     print(f"Waiting for the download to complete...")
-    downloaded_file_path = wait_for_download(timeout=20)
+    downloaded_file_path = wait_for_download(timeout=20, download_start_time=download_start_time)
 
     print(f"Moving downloaded video to {save_path}...")
     os.rename(downloaded_file_path, save_path)  # Move file to final save path
@@ -212,9 +243,48 @@ def get_videos_by_hashtags(hashtags):
             time.sleep(random.randint(30, 60))
         # Replace the placeholder with the current hashtag
         url = base_url.replace("{keyword}", hashtag)
-        print(f"Fetching videos {url}")
+        print(f"Fetching videos for hashtag: {hashtag}")
+        print(f"URL: {url}")
+        
         response = open_chrome_and_copy_text(url)
-        yield json.loads(response)["data"]
+        
+        if not response:
+            print(f"Warning: No response received for hashtag {hashtag}")
+            continue
+            
+        print(f"Response length: {len(response)} characters")
+        print(f"Response preview: {response[:200]}...")
+        
+        try:
+            json_data = json.loads(response)
+            print(f"Successfully parsed JSON for hashtag {hashtag}")
+            print(f"JSON keys: {list(json_data.keys()) if isinstance(json_data, dict) else 'Not a dict'}")
+            
+            # Check if we got a login error
+            if "status_code" in json_data and json_data.get("status_code") == 2483:
+                print(f"Login required for hashtag {hashtag}: {json_data.get('status_msg', 'Unknown error')}")
+                continue
+                
+            if "data" in json_data:
+                data = json_data["data"]
+                print(f"Found 'data' field with {len(data) if isinstance(data, list) else 'non-list'} items")
+                yield data
+            else:
+                print(f"Warning: No 'data' field in response for hashtag {hashtag}")
+                print(f"Available keys: {list(json_data.keys()) if isinstance(json_data, dict) else 'Not a dict'}")
+                # Try to find video data in other possible fields
+                if isinstance(json_data, dict):
+                    for key in ["itemList", "items", "videos", "results"]:
+                        if key in json_data:
+                            print(f"Found alternative data field '{key}' with {len(json_data[key]) if isinstance(json_data[key], list) else 'non-list'} items")
+                            yield json_data[key]
+                            break
+                    else:
+                        print("No video data found in any expected fields")
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON for hashtag {hashtag}: {e}")
+            print(f"Raw response: {response}")
+            continue
 
 
 # Function to fetch trending videos
@@ -283,9 +353,16 @@ def cli():
 
 @click.command()
 @click.option("--mute-by-default", is_flag=True, help="Mute videos by default when uploading metadata.")
-def upload_trending_videos(mute_by_default):
+@click.option("--limit", type=int, default=None, help="Limit the number of videos to process.")
+def upload_trending_videos(mute_by_default, limit):
     videos = fetch_trending_videos()
     print(f"Found {len(videos)} trending videos.")
+    
+    # Apply limit if specified
+    if limit is not None:
+        videos = videos[:limit]
+        print(f"Processing {len(videos)} videos (limited to {limit}).")
+    
     for video_info in videos:
         description = video_info.get("desc", "")
         hashtags = [tag["hashtagName"] for tag in video_info.get("textExtra", []) if "hashtagName" in tag]
@@ -296,21 +373,31 @@ def upload_trending_videos(mute_by_default):
 @click.command()
 @click.option("--hashtags", help="List of hashtags to fetch videos for.")
 @click.option("--mute-by-default", is_flag=True, help="Mute videos by default when uploading metadata.")
-def upload_videos_by_hashtags(hashtags, mute_by_default):
+@click.option("--limit", type=int, default=None, help="Limit the number of videos to process.")
+def upload_videos_by_hashtags(hashtags, mute_by_default, limit):
     hashtags = hashtags.split(",")
     random.shuffle(hashtags)
     print(f"Fetching videos for hashtags: {hashtags}")
     videos = get_videos_by_hashtags(hashtags)
+    
+    processed_count = 0
+    
     for hashtag_videos in videos:
         for video_info in hashtag_videos:
+            # Check if we've reached the limit
+            if limit is not None and processed_count >= limit:
+                print(f"Reached limit of {limit} videos. Stopping processing.")
+                return
+                
             try:
-                print(f"Processing video {video_info['item']['id']}")
+                print(f"Processing video {video_info['item']['id']} ({processed_count + 1}/{limit if limit else 'unlimited'})")
                 video_info = video_info["item"]
                 description = video_info.get("desc", "")
                 hashtags = [tag["hashtagName"] for tag in video_info.get("textExtra", []) if "hashtagName" in tag]
                 print(f"{description=}, {hashtags=}")
                 file_path = download_video_ssstik(video_info, "hashtags")
                 submit_media(file_path, description, hashtags, mute_by_default)
+                processed_count += 1
             except Exception as e:
                 print(f"Skip video {e}")
                 traceback.print_exc()

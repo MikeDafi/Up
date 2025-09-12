@@ -70,9 +70,8 @@ const VideoProvider = ({children, video_feed_type}) => {
 
 
   const keepUnSeenVideoMetadatas = async (videoMetadatas) => {
-    const seenVideoMetadatas = await getSeenVideoMetadatasCache();
-    const seenVideoIds = seenVideoMetadatas.map((videoMetadata) => videoMetadata.videoId);
-    return videoMetadatas.filter((videoMetadata) => !seenVideoIds.includes(videoMetadata.videoId));
+    // Return all videos without filtering out seen ones
+    return videoMetadatas;
   }
 
   const fetchNewVideos = async (isManual = false, setRefreshingVariable = true) => {
@@ -111,15 +110,16 @@ const VideoProvider = ({children, video_feed_type}) => {
         return;
       }
       videoMetadataBatch = response.video_feed.map(videoRawMetadata => new VideoMetadata(videoRawMetadata));
+      
+      // Debug: Log the video IDs being fetched
+      console.log("Fetched video IDs:", videoMetadataBatch.map(v => v.videoId));
     } catch (err) {
       console.error("Error fetching videos:", err);
       setError(err.message);
     }
 
     const unSeenVideoMetadatasBatch = await keepUnSeenVideoMetadatas(videoMetadataBatch);
-    if (unSeenVideoMetadatasBatch.length !== videoMetadataBatch.length) {
-      console.warn("Some videos were already seen, removing them. videoMetadataBatch:", videoMetadataBatch.length, "unSeenVideoMetadatasBatch:", unSeenVideoMetadatasBatch.length);
-    }
+    // Note: No longer filtering out seen videos, so this warning is no longer relevant
 
     if (unSeenVideoMetadatasBatch.length === 0) {
       setRefreshing(false);

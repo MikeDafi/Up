@@ -19,6 +19,17 @@ import {
   VideoFeedType,
 } from '../atoms/constants';
 
+// Utility function to check if a video exists in S3
+const checkVideoExists = async (videoId) => {
+  try {
+    const response = await fetch(`${COMPRESSED_S3_BUCKET}/${videoId}`, { method: 'HEAD' });
+    return response.ok;
+  } catch (error) {
+    console.error(`Error checking video existence for ${videoId}:`, error);
+    return false;
+  }
+};
+
 const VideoSlide = () => {
   const {
     isMuted,
@@ -63,8 +74,13 @@ const VideoSlide = () => {
     };
 
     const handleVideoError = (videoId, error) => {
+      const videoUrl = `${COMPRESSED_S3_BUCKET}/${videoId}`;
+      console.error(`Video playback error for ID: ${videoId}`);
+      console.error(`Video URL: ${videoUrl}`);
+      console.error(`Error details: ${error}`);
+      
       if (error.includes('-1102 and domain \\"NSURLErrorDomain\\"')) {
-        error = "Failed to load video. May not exist anymore.";
+        error = `Failed to load video ${videoId}. Video may not exist in S3 bucket.`;
       }
       setVideoError(error);
     };

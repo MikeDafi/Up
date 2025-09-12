@@ -2,6 +2,7 @@
   "expo": {
     "name": "Splytt",
     "slug": "Splytt",
+    "sdkVersion": "54.0.0",
     "newArchEnabled": true,
     "version": "1.0.0",
     "orientation": "portrait",
