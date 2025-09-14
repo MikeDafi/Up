@@ -1,0 +1,14 @@
+{
+  "hashtag_categories": {
+    "dance_music": "dance,ballet,hiphop,contemporary,jazz,tap,salsa,bachata,kpop,choreography,music,singing,rap,freestyle,beatbox,acoustic,guitar,piano,violin,drums",
+    "fitness_health": "fitness,workout,gym,yoga,pilates,running,cycling,swimming,weightlifting,cardio,abs,legs,arms,stretching,meditation,wellness,healthy,nutrition,diet,weightloss",
+    "food_cooking": "cooking,recipe,food,baking,chef,kitchen,delicious,tasty,homemade,restaurant,dessert,cake,pizza,pasta,sushi,healthyfood,vegan,vegetarian,breakfast,lunch",
+    "fashion_beauty": "fashion,style,outfit,makeup,beauty,skincare,hair,nails,jewelry,accessories,shopping,designer,vintage,streetwear,casual,formal,summer,winter,spring,fall",
+    "travel_adventure": "travel,adventure,vacation,explore,wanderlust,nature,mountains,beach,city,country,culture,backpacking,roadtrip,hiking,camping,photography,sunset,sunrise,landscape,wildlife",
+    "technology_gaming": "tech,gaming,computer,phone,app,software,coding,programming,AI,robot,gadget,review,tutorial,hack,innovation,future,digital,online,streaming,esports",
+    "comedy_entertainment": "comedy,funny,humor,joke,prank,meme,reaction,entertainment,actor,actress,movie,show,series,celebrity,viral,trending,popular,amazing,incredible,awesome",
+    "education_learning": "education,learning,study,school,college,university,knowledge,science,math,history,language,tutorial,tips,advice,howto,explain,facts,interesting,mindblowing,educational",
+    "lifestyle_daily": "lifestyle,daily,routine,morning,night,home,family,friends,relationship,love,life,motivation,inspiration,goals,success,happiness,positivity,selfcare,mentalhealth,mindfulness",
+    "sports_activities": "sports,football,basketball,soccer,tennis,golf,baseball,hockey,volleyball,badminton,tabletennis,boxing,martialarts,skateboarding,surfing,skiing,snowboarding,climbing,parkour"
+  }
+}
