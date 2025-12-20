@@ -34,3 +34,10 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+# Video retrieval
+video_retrieval/browser_state/
+video_retrieval/video_ids.txt
+video_retrieval/*.log
+video_retrieval/videos_downloads/
+*.mp4

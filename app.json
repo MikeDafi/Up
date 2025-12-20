@@ -3,8 +3,14 @@
     "name": "Splytt",
     "slug": "Splytt",
     "sdkVersion": "54.0.0",
+    "owner": "mike0264",
     "newArchEnabled": true,
     "version": "1.0.0",
+    "extra": {
+      "eas": {
+        "projectId": "bd75a844-075d-4325-a99a-dc25a4a50d26"
+      }
+    },
     "orientation": "portrait",
     "icon": "./assets/icons/Splytt.png",
     "userInterfaceStyle": "light",
@@ -22,15 +28,25 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "permissions": [],
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
       "package": "com.anonymous.Splytt"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "react-native-video",
       "expo-location"
-    ]
+    ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/bd75a844-075d-4325-a99a-dc25a4a50d26"
+    }
   }
 }
