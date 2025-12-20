@@ -1,0 +1,68 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      update_group_id:
+        description: 'Update Group ID to promote (leave empty for latest staging)'
+        required: false
+        type: string
+      message:
+        description: 'Release message'
+        required: false
+        default: 'Promoted from staging'
+        type: string
+
+jobs:
+  promote:
+    name: Promote Staging to Production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for EXPO_TOKEN
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "You must provide an EXPO_TOKEN secret linked to this project's Expo account in this repo's secrets."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Get latest staging update
+        id: get-staging
+        run: |
+          if [ -n "${{ inputs.update_group_id }}" ]; then
+            echo "update_id=${{ inputs.update_group_id }}" >> $GITHUB_OUTPUT
+          else
+            # Get the latest update from staging branch
+            LATEST=$(eas update:list --branch staging --limit 1 --json --non-interactive | jq -r '.[0].group')
+            echo "update_id=$LATEST" >> $GITHUB_OUTPUT
+            echo "Latest staging update: $LATEST"
+          fi
+
+      - name: Promote to Production
+        run: |
+          echo "Promoting update ${{ steps.get-staging.outputs.update_id }} to production..."
+          eas update:republish --group ${{ steps.get-staging.outputs.update_id }} --branch production --message "${{ inputs.message }}"
+
+      - name: Summary
+        run: |
+          echo "✅ Successfully promoted to production!"
+          echo "Update Group: ${{ steps.get-staging.outputs.update_id }}"
+          echo "Message: ${{ inputs.message }}"
+

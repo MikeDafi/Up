@@ -187,18 +187,19 @@ const VideoProvider = ({children, video_feed_type}) => {
       setRefreshing(true);
     }
 
-    if (!lastTimeRefreshed || (new Date() - lastTimeRefreshed) > VIDEO_REFRESH_PERIOD_SECONDS) {
-      setLastTimeRefreshed(new Date());
-    } else {
-      setTimeout(() => setRefreshing(false), 1000);
-      if (isManual) {
+    // Only apply rate limiting for manual refreshes (pull-to-refresh)
+    // Automatic fetches when reaching end of feed should always proceed
+    if (isManual) {
+      if (!lastTimeRefreshed || (new Date() - lastTimeRefreshed) > VIDEO_REFRESH_PERIOD_SECONDS) {
+        setLastTimeRefreshed(new Date());
+      } else {
+        setTimeout(() => setRefreshing(false), 1000);
         console.debug("Manual refresh too soon");
         const minutes = Math.floor((VIDEO_REFRESH_PERIOD_SECONDS - (new Date() - lastTimeRefreshed)) / 60000);
         setTemporaryWarning(`Wait ${minutes} minutes before refreshing again`);
         setTimeout(() => setTemporaryWarning(""), 2000);
+        return;
       }
-      console.debug("Automatic refresh too soon");
-      return;
     }
 
     let videoMetadataBatch = [];

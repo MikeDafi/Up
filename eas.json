@@ -6,15 +6,36 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      }
     },
-    "preview": {
-      "distribution": "internal"
+    "staging": {
+      "distribution": "store",
+      "channel": "staging",
+      "ios": {
+        "autoIncrement": true
+      }
     },
-    "production": {}
+    "production": {
+      "channel": "production",
+      "ios": {
+        "autoIncrement": true
+      }
+    }
   },
   "submit": {
-    "production": {}
+    "staging": {
+      "ios": {
+        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID"
+      }
+    },
+    "production": {
+      "ios": {
+        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID"
+      }
+    }
   }
 }
 

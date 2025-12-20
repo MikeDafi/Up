@@ -1,4 +1,4 @@
-name: EAS Update
+name: Deploy to Staging
 
 on:
   pull_request:
@@ -8,8 +8,8 @@ on:
       - closed
 
 jobs:
-  update:
-    name: EAS Update
+  deploy-staging:
+    name: Deploy to Staging
     runs-on: ubuntu-latest
     if: github.event.pull_request.merged == true
     steps:
@@ -39,5 +39,5 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Publish update
-        run: eas update --branch production --message "${{ github.event.pull_request.title }}"
+      - name: Publish to Staging
+        run: eas update --branch staging --message "${{ github.event.pull_request.title }}"

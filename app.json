@@ -21,7 +21,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.Splytt"
+      "bundleIdentifier": "com.failco.Splytt"
     },
     "android": {
       "adaptiveIcon": {
@@ -34,7 +34,7 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ],
-      "package": "com.anonymous.Splytt"
+      "package": "com.failco.Splytt"
     },
     "web": {
       "favicon": "./assets/favicon.png"
