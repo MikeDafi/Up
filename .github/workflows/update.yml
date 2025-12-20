@@ -1,14 +1,17 @@
 name: EAS Update
 
 on:
-  push:
+  pull_request:
     branches:
       - main
+    types:
+      - closed
 
 jobs:
   update:
     name: EAS Update
     runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
     steps:
       - name: Check for EXPO_TOKEN
         run: |
@@ -37,4 +40,4 @@ jobs:
         run: npm install
 
       - name: Publish update
-        run: eas update --branch production --message "${{ github.event.head_commit.message }}"
+        run: eas update --branch production --message "${{ github.event.pull_request.title }}"
