@@ -26,6 +26,112 @@ import {VideoMetadata} from '../atoms/VideoMetadata';
 import {calculateAndUpdateConfidenceScoreCache} from "../atoms/confidencescores";
 import TemporaryWarningBanner from "./TemporaryWarningBanner";
 
+/**
+ * Track video assignments across feeds to prevent duplicates during concurrent fetches.
+ * This handles the race condition when both feeds load simultaneously.
+ */
+const globalVideoAssignments = {}; // {videoId: feedType}
+const MAX_GLOBAL_ASSIGNMENTS = 500; // Clean up after this many entries
+
+/**
+ * Track feed lengths globally to enable weighted distribution
+ */
+const globalFeedLengths = {
+  [VideoFeedType.VIDEO_AUDIO_FEED]: 0,
+  [VideoFeedType.VIDEO_FOCUSED_FEED]: 0,
+};
+
+/**
+ * Update the global feed length for a specific feed type
+ */
+const updateGlobalFeedLength = (feedType, length) => {
+  globalFeedLengths[feedType] = length;
+};
+
+/**
+ * Calculate weighted probability to favor the shorter feed
+ * Returns probability that a video should be assigned to currentFeedType
+ */
+const calculateWeightedProbability = (currentFeedType, otherFeedType) => {
+  const currentLength = globalFeedLengths[currentFeedType] || 0;
+  const otherLength = globalFeedLengths[otherFeedType] || 0;
+  const totalLength = currentLength + otherLength;
+  
+  // If both feeds are empty or equal, use 50/50
+  if (totalLength === 0 || currentLength === otherLength) {
+    return 0.5;
+  }
+  
+  // Favor the shorter feed: shorter feed gets higher probability
+  // If current feed is shorter, it should get more videos
+  // Probability = otherLength / totalLength (inverse relationship)
+  // Clamp between 0.2 and 0.8 to prevent extreme bias
+  const rawProbability = otherLength / totalLength;
+  const clampedProbability = Math.max(0.2, Math.min(0.8, rawProbability));
+  
+  console.debug(`Feed lengths - ${currentFeedType}: ${currentLength}, ${otherFeedType}: ${otherLength}, probability for current: ${clampedProbability.toFixed(2)}`);
+  
+  return clampedProbability;
+};
+
+/**
+ * Clean up old video assignments to prevent unbounded memory growth
+ */
+const cleanupOldAssignments = () => {
+  const assignmentKeys = Object.keys(globalVideoAssignments);
+  if (assignmentKeys.length > MAX_GLOBAL_ASSIGNMENTS) {
+    // Remove oldest 25% of entries
+    const toRemove = Math.floor(assignmentKeys.length * 0.25);
+    assignmentKeys.slice(0, toRemove).forEach(key => delete globalVideoAssignments[key]);
+    console.debug(`Cleaned up ${toRemove} old video assignments`);
+  }
+};
+
+const deduplicateAcrossFeeds = async (newVideos, currentFeedType) => {
+  // Clean up old assignments periodically
+  cleanupOldAssignments();
+  
+  const otherFeedType = currentFeedType === VideoFeedType.VIDEO_AUDIO_FEED 
+    ? VideoFeedType.VIDEO_FOCUSED_FEED 
+    : VideoFeedType.VIDEO_AUDIO_FEED;
+  
+  // Calculate weighted probability based on feed lengths
+  const probabilityForCurrentFeed = calculateWeightedProbability(currentFeedType, otherFeedType);
+  
+  const deduplicatedVideos = [];
+  
+  for (const video of newVideos) {
+    const videoId = video.videoId;
+    
+    // Check if this video has already been assigned to a feed during current session
+    if (globalVideoAssignments[videoId]) {
+      const assignedFeed = globalVideoAssignments[videoId];
+      if (assignedFeed === currentFeedType) {
+        // Already assigned to current feed, keep it
+        deduplicatedVideos.push(video);
+      } else {
+        // Already assigned to other feed during concurrent fetch, skip it
+        console.debug(`Video ${videoId} already assigned to ${assignedFeed}, skipping in ${currentFeedType}`);
+      }
+    } else {
+      // First time seeing this video - assign with weighted probability favoring shorter feed
+      const assignToCurrentFeed = Math.random() < probabilityForCurrentFeed;
+      const assignedFeed = assignToCurrentFeed ? currentFeedType : otherFeedType;
+      
+      globalVideoAssignments[videoId] = assignedFeed;
+      
+      if (assignToCurrentFeed) {
+        deduplicatedVideos.push(video);
+        console.debug(`Video ${videoId} assigned to ${currentFeedType} (weight: ${(probabilityForCurrentFeed * 100).toFixed(0)}%)`);
+      } else {
+        console.debug(`Video ${videoId} assigned to ${otherFeedType}, skipping in ${currentFeedType}`);
+      }
+    }
+  }
+  
+  return deduplicatedVideos;
+};
+
 const VideoProvider = ({children, video_feed_type}) => {
   const isFocused = useIsFocused();
   const [isMuted, setMuted] = useState(video_feed_type === VideoFeedType.VIDEO_FOCUSED_FEED);
@@ -113,6 +219,9 @@ const VideoProvider = ({children, video_feed_type}) => {
       
       // Debug: Log the video IDs being fetched
       console.log("Fetched video IDs:", videoMetadataBatch.map(v => v.videoId));
+      
+      // Cross-feed deduplication: Remove videos that exist in the other feed type
+      videoMetadataBatch = await deduplicateAcrossFeeds(videoMetadataBatch, video_feed_type);
     } catch (err) {
       console.error("Error fetching videos:", err);
       setError(err.message);
@@ -193,6 +302,12 @@ const VideoProvider = ({children, video_feed_type}) => {
     checkVideoCache();
     setPaused(!isFocused)
   }, [isFocused]);
+
+  // Update global feed length for weighted distribution across feeds
+  useEffect(() => {
+    updateGlobalFeedLength(video_feed_type, videoMetadatas.length);
+  }, [videoMetadatas.length, video_feed_type]);
+
   const providerHandleMutedPress = () => {
     setMuted((prev) => !prev);
   };

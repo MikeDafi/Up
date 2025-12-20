@@ -14,6 +14,18 @@ import {
 } from "./constants";
 
 /**
+ * Rounds a number to 6 significant figures to reduce storage size.
+ * @param {number} num - The number to round.
+ * @returns {number} - The rounded number.
+ */
+const roundToSigFigs = (num, sigFigs = 6) => {
+  if (num === 0) return 0;
+  const magnitude = Math.floor(Math.log10(Math.abs(num)));
+  const scale = Math.pow(10, sigFigs - magnitude - 1);
+  return Math.round(num * scale) / scale;
+};
+
+/**
  * Calculates the confidence score update for different user interactions.
  *
  * @param {Object} interactions - An object containing interaction counts.
@@ -45,7 +57,8 @@ const applyScoreDecay = (currentScoreMetadatas, decayFactor = 0.98) => {
   for (const [hashtag, scoreMetadatas] of Object.entries(currentScoreMetadatas)) {
     // Decay by number of days since last update
     const daysSinceLastUpdate = (Date.now() - scoreMetadatas.last_updated) / (24 * 60 * 60 * 1000);
-    updatedScores[hashtag] = Math.max(0, scoreMetadatas.score * Math.pow(decayFactor, daysSinceLastUpdate));
+    const decayedScore = roundToSigFigs(Math.max(0, scoreMetadatas.score * Math.pow(decayFactor, daysSinceLastUpdate)));
+    updatedScores[hashtag] = decayedScore;
   }
   return updatedScores;
 };
@@ -67,7 +80,8 @@ export const calculateAndUpdateConfidenceScoreCache = async (video_feed_type, ha
     const scoreUpdate = calculateConfidenceScoreUpdate(interactions);
     // if score in currentScoresMetadatas is null, set it
     const currentScore = currentScoreMetadata.score ?? 0;
-    currentScoresMetadatas[hashtag] = {"score": Math.max(0, currentScore + scoreUpdate), "last_updated": currentDate};
+    const newScore = roundToSigFigs(Math.max(0, currentScore + scoreUpdate));
+    currentScoresMetadatas[hashtag] = {"score": newScore, "last_updated": currentDate};
   }
 
   // Extract the top confidence scores and update the cache
@@ -113,7 +127,7 @@ const sortHashtagToConfidenceScoreMetadatas = (currentScoresMetadatas, list_limi
       .sort(([, scoreMetadataA], [, scoreMetadataB]) => scoreMetadataB.score - scoreMetadataA.score)
       .slice(0, list_limit)
       .reduce((acc, [hashtag, scoreMetadata]) => {
-        acc[hashtag] = keepScoresOnly ? scoreMetadata.score : scoreMetadata;
+        acc[hashtag] = keepScoresOnly ? roundToSigFigs(scoreMetadata.score) : scoreMetadata;
         return acc;
       }, {});
 };

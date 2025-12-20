@@ -18,7 +18,13 @@ const VideoDescriptionSlide = () => {
     const videoMetadata = videoMetadatas[videoIndexExternalView];
     if (!videoMetadata) return ''; // Prevent accessing undefined
 
-    return videoMetadata.description || '';
+    // Combine description with hashtags for display
+    const descText = videoMetadata.description || '';
+    const hashtags = videoMetadata.hashtags || [];
+    const hashtagText = hashtags.map(tag => tag.startsWith('#') ? tag : `#${tag}`).join(' ');
+    
+    // Return combined text, trimmed
+    return [descText, hashtagText].filter(Boolean).join(' ').trim();
   }, [videoMetadatas, videoIndexExternalView]);
 
   useEffect(() => {
