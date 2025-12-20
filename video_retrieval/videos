@@ -1,0 +1,1136 @@
+#!/usr/bin/env python3
+"""
+Videos CLI - TikTok video retrieval and publishing tool.
+
+Commands:
+  get       - Scrape video IDs from TikTok and store in file
+  publish   - Download and publish videos from stored IDs
+  list      - List all stored video IDs
+"""
+import asyncio
+import click
+import json
+import sys
+import traceback
+import os
+import subprocess
+import requests
+import backoff
+import time
+import boto3
+from datetime import datetime
+from pathlib import Path
+from playwright.async_api import async_playwright
+
+# Storage file for video IDs
+STORAGE_FILE = Path(__file__).parent / "video_ids.txt"
+
+# Browser state storage (for cookies/login persistence)
+BROWSER_STATE_DIR = Path(__file__).parent / "browser_state"
+
+# Download directory
+DOWNLOAD_DIR = Path(__file__).parent / "videos_downloads"
+
+# Constants for API URLs (for publishing)
+S3_API_URL = "https://o28an1f9e8.execute-api.us-east-2.amazonaws.com/prod"
+CREATE_VIDEO_METADATA_URL = "https://vie8q37y20.execute-api.us-east-2.amazonaws.com/prod/createVideoMetadata"
+
+# ============================================================================
+# Video Download and Upload Functions
+# ============================================================================
+
+def create_directory(path):
+    """Create directory if it doesn't exist."""
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+def open_chrome_and_copy_text(url):
+    """Opens Chrome, navigates to URL, and fetches page content using AppleScript."""
+    apple_script = f"""
+        tell application "Google Chrome"
+            activate
+            open location "{url}"
+            delay 5
+            tell front window's active tab
+                set pageContent to execute javascript "document.documentElement.innerText"
+            end tell
+            return pageContent
+        end tell
+    """
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", apple_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"AppleScript error: {e.stderr}")
+        raise
+
+def open_url_in_chrome(url):
+    """Opens URL in Chrome to trigger download."""
+    apple_script = f"""
+        tell application "Google Chrome"
+            activate
+            open location "{url}"
+        end tell
+    """
+    try:
+        subprocess.run(
+            ["osascript", "-e", apple_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        click.echo(f"  ❌ AppleScript error: {e.stderr}")
+        raise
+
+def setup_chrome_download_folder():
+    """Setup Chrome to download to our videos_downloads folder."""
+    # Create the download directory if it doesn't exist
+    DOWNLOAD_DIR.mkdir(exist_ok=True)
+    return str(DOWNLOAD_DIR.absolute())
+
+def wait_for_download(video_id, timeout=20):
+    """Waits for a specific video file to appear in the download folder."""
+    expected_path = DOWNLOAD_DIR / f"{video_id}.mp4"
+    
+    click.echo(f"     Looking for: {expected_path}")
+    
+    start_time = time.time()
+    last_status_time = start_time
+    
+    while time.time() - start_time < timeout:
+        # Check for the specific file
+        if expected_path.exists():
+            file_size = expected_path.stat().st_size
+            if file_size > 1024:  # At least 1KB
+                return str(expected_path)
+        
+        # Also check for any recent .mp4 files in the directory
+        mp4_files = list(DOWNLOAD_DIR.glob("*.mp4"))
+        if mp4_files:
+            # Find most recent file
+            recent_file = max(mp4_files, key=lambda p: p.stat().st_mtime)
+            # If it's recent (within last 30 seconds), assume it's our file
+            if time.time() - recent_file.stat().st_mtime < 30:
+                file_size = recent_file.stat().st_size
+                if file_size > 1024:  # At least 1KB
+                    # Rename to expected name if different
+                    if recent_file != expected_path:
+                        click.echo(f"     Renaming {recent_file.name} → {video_id}.mp4")
+                        recent_file.rename(expected_path)
+                    return str(expected_path)
+        
+        # Print status every 5 seconds
+        current_time = time.time()
+        if current_time - last_status_time >= 5:
+            elapsed = int(current_time - start_time)
+            files_in_dir = len(list(DOWNLOAD_DIR.glob("*.mp4")))
+            click.echo(f"     ⏳ {elapsed}s | {files_in_dir} files in download folder")
+            last_status_time = current_time
+        
+        time.sleep(1)
+    
+    # Timeout - provide helpful error message
+    files_in_dir = list(DOWNLOAD_DIR.glob("*.mp4"))
+    click.echo(f"     ❌ Timeout after {timeout}s")
+    click.echo(f"     📁 Files in {DOWNLOAD_DIR}: {[f.name for f in files_in_dir]}")
+    click.echo(f"     💡 Make sure Chrome downloads to: {DOWNLOAD_DIR.absolute()}")
+    
+    raise FileNotFoundError(f"Download failed: {expected_path} not found after {timeout} seconds.")
+
+def crop_video(file_path):
+    """Crop video to appropriate aspect ratio."""
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,bit_rate",
+        "-of", "csv=p=0",
+        file_path,
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+    try:
+        width, height, bit_rate = map(int, result.stdout.strip().split(","))
+    except ValueError as e:
+        print(f"Error getting video dimensions: {e}")
+        raise
+    
+    if height > width:
+        crop_height = int(height * 0.7)
+        crop_width = width
+    else:
+        crop_width = crop_height = min(width, height)
+    
+    x_offset = (width - crop_width) // 2
+    y_offset = (height - crop_height) // 2
+    
+    # Create temporary output file
+    temp_output = file_path.replace('.mp4', '_cropped.mp4')
+    
+    cmd = [
+        "ffmpeg",
+        "-i", file_path,
+        "-vf", f"crop={crop_width}:{crop_height}:{x_offset}:{y_offset}",
+        "-c:v", "libx264",
+        "-preset", "slower",
+        "-crf", "18",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-movflags", "+faststart",
+        temp_output,
+        "-y",
+    ]
+    subprocess.run(cmd, check=True)
+    
+    # Replace original with cropped version
+    import os
+    os.replace(temp_output, file_path)
+    return file_path
+
+async def download_video_playwright(page, video_id):
+    """Download a video using Playwright via ssstik.io."""
+    tiktok_url = f"https://www.tiktok.com/@x/video/{video_id}"
+    expected_path = DOWNLOAD_DIR / f"{video_id}.mp4"
+    
+    # Check if file already exists
+    if expected_path.exists() and expected_path.stat().st_size > 1024:
+        click.echo(f"  ✅ File already exists: {expected_path}")
+        return str(expected_path)
+    
+    click.echo(f"  📥 Using ssstik.io to download...")
+    
+    try:
+        # Navigate to ssstik.io
+        await page.goto('https://ssstik.io/en', wait_until='domcontentloaded', timeout=15000)
+        await asyncio.sleep(2)
+        
+        # Enter TikTok URL
+        click.echo(f"  📝 Entering TikTok URL...")
+        await page.fill('input[id="main_page_text"]', tiktok_url)
+        await asyncio.sleep(1)
+        
+        # Click download button
+        click.echo(f"  🖱️  Clicking download button...")
+        await page.click('button:has-text("Download")')
+        
+        # Wait for the actual video download link to appear (not the /download-tiktok-stories link)
+        click.echo(f"  ⏳ Waiting for video download link...")
+        await asyncio.sleep(10)  # Give ssstik.io time to process the video
+        
+        # Find the REAL download link (must contain tikcdn or be a direct .mp4 link)
+        download_link = None
+        download_url = None
+        for i in range(20):
+            try:
+                # Look for links that contain tikcdn or point to .mp4 files
+                all_links = await page.locator('a').all()
+                for link in all_links:
+                    href = await link.get_attribute('href')
+                    if href and ('tikcdn' in href or href.endswith('.mp4') or 'tiktokcdn' in href):
+                        download_url = href
+                        download_link = link
+                        click.echo(f"  ✅ Found video link: {href[:80]}...")
+                        break
+                
+                if download_url:
+                    break
+            except Exception as e:
+                pass
+            
+            if i % 5 == 0 and i > 0:
+                click.echo(f"     Still waiting for video link... {i}s")
+            await asyncio.sleep(1)
+        
+        if not download_url:
+            raise Exception("Could not find video download link on ssstik.io after 20s")
+        
+        # The URL should already be absolute for tikcdn links
+        click.echo(f"  🔗 Video URL: {download_url[:80]}...")
+        
+        # Now use requests to download the file directly with proper headers
+        click.echo(f"  📥 Downloading file...")
+        import requests
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+            'Referer': 'https://ssstik.io/',
+            'Accept': '*/*',
+        }
+        response = requests.get(download_url, stream=True, timeout=60, headers=headers, allow_redirects=True)
+        
+        if response.status_code != 200:
+            raise Exception(f"HTTP {response.status_code}: {response.reason}")
+        
+        # Write to file and track bytes written
+        bytes_written = 0
+        with open(expected_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    bytes_written += len(chunk)
+        
+        click.echo(f"  📦 Wrote {bytes_written / (1024*1024):.1f}MB to disk")
+        
+        # Verify file size
+        if expected_path.stat().st_size < 1024:
+            raise Exception(f"Downloaded file is too small: {expected_path.stat().st_size} bytes")
+        
+        size_mb = expected_path.stat().st_size / (1024 * 1024)
+        click.echo(f"  ✅ Downloaded: {size_mb:.1f}MB")
+        return str(expected_path)
+        
+    except Exception as e:
+        click.echo(f"  ❌ Error during download: {e}")
+        raise
+
+def get_presigned_url(file_name, content_type):
+    """Get presigned URL from S3 API."""
+    print(f"Getting presigned URL for {file_name}")
+    response = requests.get(f"{S3_API_URL}/getPresignedUrl?fileName={file_name}&contentType={content_type}")
+    response.raise_for_status()
+    presigned_url = response.json()["url"]
+    print(f"Presigned URL: {presigned_url.split('?')[0]}")  # Show URL without query params
+    return presigned_url
+
+def upload_video(file_path, presigned_url):
+    """Upload video to S3."""
+    print(f"Uploading video to S3: {file_path}")
+    with open(file_path, "rb") as f:
+        response = requests.put(presigned_url, data=f, headers={"Content-Type": "video/mp4"})
+        if not response.ok:
+            raise Exception(f"Failed to upload video to S3: {response.text}")
+
+def submit_media(file_path, description, hashtags, mute_by_default):
+    """Upload video and metadata via Lambda."""
+    cropped_file_path = crop_video(file_path)
+    
+    file_name = os.path.basename(cropped_file_path)
+    presigned_url = get_presigned_url(file_name, "video/mp4")
+    
+    upload_video(cropped_file_path, presigned_url)
+    
+    # Get the video ID and S3 base URL from the presigned URL
+    url_without_params = presigned_url.split("?")[0]
+    video_id = url_without_params.split("/")[-1]
+    s3_base_url = "/".join(url_without_params.split("/")[:-1])
+    
+    # Invoke Lambda function to create metadata
+    metadata = {
+        "videoId": video_id,
+        "description": description,
+        "hashtags": hashtags,
+        "muteByDefault": mute_by_default,
+    }
+    print(f"Invoking Lambda with metadata: {metadata}")
+    
+    # Invoke Lambda function
+    lambda_client = boto3.client('lambda', region_name='us-east-2')
+    
+    lambda_payload = {
+        "body": json.dumps(metadata)
+    }
+    
+    response = lambda_client.invoke(
+        FunctionName='up-create-video-metadata',
+        InvocationType='RequestResponse',
+        Payload=json.dumps(lambda_payload)
+    )
+    
+    response_payload = json.loads(response['Payload'].read())
+    print(f"Lambda response: {response_payload}")
+    
+    if response_payload.get('statusCode') != 200:
+        raise Exception(f"Lambda failed: {response_payload}")
+    
+    print(f"Finished uploading video: {file_path}")
+    return video_id, s3_base_url
+
+# ============================================================================
+# Storage Functions
+# ============================================================================
+
+# Search keywords
+SEARCH_KEYWORDS = [
+    'trending',
+    'comedy',
+    'dance',
+    'food',
+    'sports',
+    'animals',
+    'fitness',
+    'travel',
+    'music',
+    'gaming',
+]
+
+def load_video_ids():
+    """Load existing video IDs from storage."""
+    if not STORAGE_FILE.exists():
+        return {}
+    
+    video_data = {}
+    with open(STORAGE_FILE, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            try:
+                data = json.loads(line)
+                video_id = data['id']
+                video_data[video_id] = data
+            except:
+                continue
+    
+    return video_data
+
+def save_video_id(video_id, category, description='', hashtags=None, date=None):
+    """Save a video ID to storage (avoiding duplicates)."""
+    if date is None:
+        date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    if hashtags is None:
+        hashtags = []
+    
+    existing = load_video_ids()
+    
+    if video_id in existing:
+        return False  # Duplicate
+    
+    data = {
+        'id': video_id,
+        'category': category,
+        'description': description[:200],
+        'hashtags': hashtags,
+        'date': date,
+        'downloaded': False,
+        'published': False
+    }
+    
+    with open(STORAGE_FILE, 'a') as f:
+        f.write(json.dumps(data) + '\n')
+    
+    return True
+
+def mark_as_downloaded(video_id):
+    """Mark a video ID as downloaded."""
+    existing = load_video_ids()
+    
+    if video_id not in existing:
+        return False
+    
+    existing[video_id]['downloaded'] = True
+    
+    # Rewrite entire file
+    with open(STORAGE_FILE, 'w') as f:
+        for vid_id, data in sorted(existing.items(), key=lambda x: (x[1]['date'], x[1]['category'])):
+            f.write(json.dumps(data) + '\n')
+    
+    return True
+
+def mark_as_published(video_id):
+    """Mark a video ID as published."""
+    existing = load_video_ids()
+    
+    if video_id not in existing:
+        return False
+    
+    existing[video_id]['published'] = True
+    
+    # Rewrite entire file
+    with open(STORAGE_FILE, 'w') as f:
+        for vid_id, data in sorted(existing.items(), key=lambda x: (x[1]['date'], x[1]['category'])):
+            f.write(json.dumps(data) + '\n')
+    
+    return True
+
+async def get_video_hashtags(page, video_id, debug=False):
+    """Visit individual video page to extract hashtags."""
+    try:
+        video_url = f"https://www.tiktok.com/@x/video/{video_id}"
+        if debug:
+            click.echo(f"\n🔍 DEBUG: Visiting {video_url}")
+        
+        await page.goto(video_url, wait_until='domcontentloaded', timeout=15000)
+        await asyncio.sleep(3)  # Wait longer for content to load
+        
+        if debug:
+            # Take screenshot for debugging
+            screenshot_path = f"/tmp/tiktok_{video_id}.png"
+            await page.screenshot(path=screenshot_path)
+            click.echo(f"📸 Screenshot saved: {screenshot_path}")
+        
+        # Extract hashtags from video page with detailed logging
+        hashtags = await page.evaluate("""
+            (debug) => {
+                const tags = [];
+                
+                if (debug) {
+                    console.log('=== DEBUGGING HASHTAG EXTRACTION ===');
+                    console.log('Page URL:', window.location.href);
+                }
+                
+                // 1. Look for hashtag links
+                const hashtagLinks = document.querySelectorAll('a[href*="/tag/"]');
+                if (debug) console.log(`Found ${hashtagLinks.length} hashtag links`);
+                
+                hashtagLinks.forEach((link, i) => {
+                    if (debug && i < 10) console.log(`Link ${i}: ${link.href} - Text: ${link.textContent}`);
+                    const match = link.href.match(/\\/tag\\/([^?]+)/);
+                    if (match && match[1]) {
+                        const tag = decodeURIComponent(match[1]).toLowerCase();
+                        tags.push(tag);
+                        if (debug) console.log(`  -> Extracted hashtag: ${tag}`);
+                    }
+                });
+                
+                // 2. Look in h1 title
+                const h1Elements = document.querySelectorAll('h1');
+                if (debug) console.log(`Found ${h1Elements.length} h1 elements`);
+                h1Elements.forEach((el, i) => {
+                    const text = el.textContent || '';
+                    if (debug && i < 5) console.log(`H1 ${i}: ${text.substring(0, 100)}`);
+                    const matches = text.match(/#[\w]+/g);
+                    if (matches) {
+                        matches.forEach(tag => {
+                            tags.push(tag.substring(1).toLowerCase());
+                            if (debug) console.log(`  -> Found hashtag in h1: ${tag}`);
+                        });
+                    }
+                });
+                
+                // 3. Look for description elements
+                const descSelectors = [
+                    '[data-e2e="browse-video-desc"]',
+                    '[data-e2e="video-desc"]',
+                    'div[data-e2e*="desc"]',
+                    'span[data-e2e*="desc"]'
+                ];
+                
+                descSelectors.forEach(selector => {
+                    const elements = document.querySelectorAll(selector);
+                    if (debug && elements.length > 0) console.log(`Found ${elements.length} elements for selector: ${selector}`);
+                    elements.forEach((el, i) => {
+                        const text = el.textContent || '';
+                        if (debug && i < 3) console.log(`  Text: ${text.substring(0, 100)}`);
+                        const matches = text.match(/#[\w]+/g);
+                        if (matches) {
+                            matches.forEach(tag => tags.push(tag.substring(1).toLowerCase()));
+                        }
+                    });
+                });
+                
+                // 4. Look for strong tags with hashtags
+                const strongTags = document.querySelectorAll('strong');
+                if (debug) console.log(`Found ${strongTags.length} strong tags`);
+                let hashtagStrongCount = 0;
+                strongTags.forEach(tag => {
+                    const text = tag.textContent?.trim() || '';
+                    if (text.startsWith('#')) {
+                        tags.push(text.substring(1).toLowerCase());
+                        hashtagStrongCount++;
+                        if (debug && hashtagStrongCount < 10) console.log(`Strong tag hashtag: ${text}`);
+                    }
+                });
+                
+                const uniqueTags = [...new Set(tags)];
+                if (debug) console.log(`Total unique hashtags found: ${uniqueTags.length}`, uniqueTags);
+                
+                return uniqueTags;
+            }
+        """, debug)
+        
+        return hashtags if hashtags else []
+    except Exception as e:
+        if debug:
+            click.echo(f"❌ Error: {e}")
+        return []
+
+async def scrape_video_ids(page, count=10, extract_hashtags=False):
+    """Scrape video IDs from current TikTok page."""
+    try:
+        # Wait for page to fully load
+        click.echo(f"  ⏳ Waiting for content...")
+        await asyncio.sleep(4)
+        
+        # Scroll to load more videos
+        click.echo(f"  📜 Scrolling...")
+        for i in range(3):
+            await page.evaluate('window.scrollBy(0, window.innerHeight)')
+            await asyncio.sleep(1)
+        
+        # Take screenshot for debugging
+        # await page.screenshot(path='/tmp/tiktok_search.png')
+        
+        # Try to extract video IDs from page
+        video_data = await page.evaluate("""
+            () => {
+                const videos = [];
+                const seenIds = new Set();
+                
+                // Find all video containers on search results
+                const videoContainers = document.querySelectorAll('div[data-e2e="search_top-item"], div[data-e2e="search-card-item"]');
+                
+                console.log(`Found ${videoContainers.length} video containers`);
+                
+                videoContainers.forEach(container => {
+                    try {
+                        // Find video link
+                        const link = container.querySelector('a[href*="/video/"]');
+                        if (!link || !link.href) return;
+                        
+                        const match = link.href.match(/\\/video\\/(\\d+)/);
+                        if (!match || !match[1]) return;
+                        
+                        const videoId = match[1];
+                        if (seenIds.has(videoId)) return;
+                        seenIds.add(videoId);
+                        
+                        // Try different selectors for description/caption
+                        let description = '';
+                        let hashtags = [];
+                        
+                        // Try to find caption/description
+                        const captionSelectors = [
+                            'h1', // Main title
+                            '[data-e2e="search-card-desc"]',
+                            '[data-e2e="search-card-title"]',
+                            'div[class*="desc"]',
+                            'div[class*="caption"]',
+                            'span[class*="desc"]',
+                            'p'
+                        ];
+                        
+                        for (const selector of captionSelectors) {
+                            const captionEl = container.querySelector(selector);
+                            if (captionEl && captionEl.textContent) {
+                                const text = captionEl.textContent.trim();
+                                if (text && text.length > 0) {
+                                    description = text;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Look for hashtags in multiple ways
+                        // 1. Check for <strong> tags (common for hashtags)
+                        const strongTags = container.querySelectorAll('strong');
+                        strongTags.forEach(tag => {
+                            const text = tag.textContent?.trim() || '';
+                            if (text.startsWith('#')) {
+                                hashtags.push(text.substring(1).toLowerCase());
+                            }
+                        });
+                        
+                        // 2. Extract from full container text
+                        const allText = container.textContent || '';
+                        const hashtagMatches = allText.match(/#[\w]+/g);
+                        if (hashtagMatches) {
+                            hashtagMatches.forEach(tag => hashtags.push(tag.substring(1).toLowerCase()));
+                        }
+                        
+                        // Remove duplicates
+                        hashtags = [...new Set(hashtags)];
+                        
+                        videos.push({
+                            id: videoId,
+                            desc: description.substring(0, 200),
+                            hashtags: hashtags
+                        });
+                        
+                    } catch (e) {
+                        console.log('Error parsing container:', e);
+                    }
+                });
+                
+                console.log(`Extracted ${videos.length} unique video IDs`);
+                return videos;
+            }
+        """)
+        
+        if video_data and len(video_data) > 0:
+            click.echo(f"  ✅ Extracted {len(video_data)} video IDs")
+        else:
+            click.echo(f"  ⚠️  No video IDs found")
+        
+        # Limit to requested count
+        video_data = video_data[:count]
+        
+        # Optionally visit each video to get hashtags
+        if extract_hashtags and video_data:
+            click.echo(f"  🏷️  Extracting hashtags from {len(video_data)} videos...")
+            for i, video in enumerate(video_data, 1):
+                click.echo(f"     [{i}/{len(video_data)}] Visiting video {video['id']}...")
+                # Enable debug mode for first video only
+                debug = (i == 1)
+                hashtags = await get_video_hashtags(page, video['id'], debug=debug)
+                video['hashtags'] = hashtags
+                if hashtags:
+                    click.echo(f"        ✅ Found: #{', #'.join(hashtags[:5])}")
+                else:
+                    click.echo(f"        ⚠️  No hashtags found")
+                await asyncio.sleep(1)  # Be nice to TikTok
+        
+        return video_data
+        
+    except Exception as e:
+        click.echo(f"  ❌ Error scraping: {e}")
+        traceback.print_exc()
+        return []
+
+@click.group()
+def cli():
+    """Videos CLI - TikTok video retrieval and publishing tool."""
+    pass
+
+@cli.command()
+@click.option('--categories', '-c', default='trending,comedy,dance', help='Comma-separated categories')
+@click.option('--count', '-n', default=10, help='Videos per category')
+@click.option('--headless', is_flag=True, help='Run browser in headless mode')
+@click.option('--extract-hashtags', '-e', is_flag=True, help='Visit each video page to extract hashtags (slower)')
+def get(categories, count, headless, extract_hashtags):
+    """Scrape video IDs from TikTok and store them."""
+    asyncio.run(get_videos(categories, count, headless, extract_hashtags))
+
+async def get_videos(categories_str, count, headless, extract_hashtags):
+    """Async function to scrape videos."""
+    categories_list = [c.strip() for c in categories_str.split(',')]
+    
+    click.echo(click.style('='*80, fg='cyan'))
+    click.echo(click.style('Video ID Scraper', fg='cyan', bold=True))
+    click.echo(click.style('='*80, fg='cyan'))
+    click.echo(f"\nCategories: {', '.join(categories_list)}")
+    click.echo(f"Videos per category: {count}")
+    click.echo(f"Headless: {headless}")
+    click.echo(f"Extract hashtags: {extract_hashtags}")
+    click.echo(f"Storage: {STORAGE_FILE}\n")
+    
+    total_new = 0
+    total_duplicates = 0
+    
+    async with async_playwright() as p:
+        click.echo("🚀 Launching browser...")
+        
+        # Create browser state directory if it doesn't exist
+        BROWSER_STATE_DIR.mkdir(exist_ok=True)
+        
+        # Use persistent context to save login/cookies between runs
+        context = await p.chromium.launch_persistent_context(
+            str(BROWSER_STATE_DIR),
+            headless=headless,
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+            args=['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+        )
+        
+        # Check if we have existing pages or need to create new one
+        pages = context.pages
+        if pages:
+            page = pages[0]
+        else:
+            page = await context.new_page()
+        
+        # Listen to console logs from the browser
+        page.on('console', lambda msg: click.echo(f"  [BROWSER] {msg.text}"))
+        
+        # Open TikTok first (needed to set cookies)
+        click.echo("📍 Opening TikTok.com...")
+        await page.goto('https://www.tiktok.com', wait_until='networkidle')
+        await asyncio.sleep(2)
+        
+        # Try to close any modals
+        try:
+            close_button = page.locator('button[aria-label="Close"]').first
+            if await close_button.is_visible(timeout=2000):
+                await close_button.click()
+        except:
+            pass
+        
+        # Process each category
+        for i, category_name in enumerate(categories_list, 1):
+            click.echo(click.style(f"\n[{i}/{len(categories_list)}] Category: {category_name.upper()}", fg='yellow', bold=True))
+            
+            # Navigate and search using URL directly
+            click.echo(f"  🔍 Searching for '{category_name}'...")
+            try:
+                search_url = f'https://www.tiktok.com/search?q={category_name}'
+                await page.goto(search_url, wait_until='networkidle', timeout=30000)
+                await asyncio.sleep(3)
+                click.echo(f"  ✅ Search submitted")
+                
+            except Exception as e:
+                click.echo(f"  ❌ Search failed: {e}")
+                continue
+            
+            # Scrape videos
+            click.echo(f"  🔍 Scraping video IDs...")
+            videos = await scrape_video_ids(page, count, extract_hashtags)
+            
+            if not videos:
+                click.echo(f"  ⚠️  No videos found")
+                continue
+            
+            click.echo(f"  ✅ Found {len(videos)} videos")
+            
+            # Save video IDs
+            new_count = 0
+            dup_count = 0
+            
+            for video in videos:
+                hashtags = video.get('hashtags', [])
+                if save_video_id(video['id'], category_name, video.get('desc', ''), hashtags):
+                    new_count += 1
+                    hashtag_str = f" #{' #'.join(hashtags)}" if hashtags else ""
+                    click.echo(f"    ✅ {video['id']}{hashtag_str} - {video.get('desc', '')[:50]}...")
+                else:
+                    dup_count += 1
+                    click.echo(f"    ⏭️  {video['id']} (duplicate)")
+            
+            total_new += new_count
+            total_duplicates += dup_count
+            
+            click.echo(f"  📊 New: {new_count}, Duplicates: {dup_count}")
+            
+            # Wait between categories
+            if i < len(categories_list):
+                click.echo("  ⏳ Waiting 5 seconds...")
+                await asyncio.sleep(5)
+        
+        await context.close()
+    
+    # Summary
+    click.echo(click.style('\n' + '='*80, fg='cyan'))
+    click.echo(click.style('SUMMARY', fg='cyan', bold=True))
+    click.echo(click.style('='*80, fg='cyan'))
+    click.echo(f"Total new video IDs: {total_new} ✅")
+    click.echo(f"Total duplicates: {total_duplicates} ⏭️")
+    click.echo(f"Storage file: {STORAGE_FILE}")
+    click.echo()
+
+@cli.command()
+@click.option('--category', '-c', default=None, help='Filter by category')
+@click.option('--limit', '-l', default=None, type=int, help='Limit number of videos to download')
+@click.option('--id', '-i', default=None, help='Download a specific video ID (ignores filters)')
+@click.option('--undownloaded-only/--all', default=True, help='Only download undownloaded videos')
+@click.option('--headless', is_flag=True, help='Run browser in headless mode')
+def download(category, limit, id, undownloaded_only, headless):
+    """Download videos from TikTok to local storage."""
+    asyncio.run(download_videos(category, limit, id, undownloaded_only, headless))
+
+async def download_videos(category, limit, id, undownloaded_only, headless):
+    """Async function to download videos using Playwright."""
+    click.echo(click.style('='*80, fg='blue'))
+    click.echo(click.style('Video Downloader', fg='blue', bold=True))
+    click.echo(click.style('='*80, fg='blue'))
+    
+    # Setup download directory
+    DOWNLOAD_DIR.mkdir(exist_ok=True)
+    
+    # Load video IDs
+    all_videos = load_video_ids()
+    
+    if not all_videos:
+        click.echo("❌ No video IDs found. Run 'videos get' first.")
+        return
+    
+    # If specific ID is provided, only download that one
+    if id:
+        if id not in all_videos:
+            click.echo(f"❌ Video ID {id} not found in storage.")
+            return
+        videos_to_download = [(id, all_videos[id])]
+        click.echo(f"\n📍 Downloading specific video: {id}\n")
+    else:
+        # Filter videos
+        videos_to_download = []
+        for vid_id, data in all_videos.items():
+            if category and data['category'] != category:
+                continue
+            if undownloaded_only and data.get('downloaded', False):
+                continue
+            videos_to_download.append((vid_id, data))
+    
+    if not videos_to_download:
+        click.echo("ℹ️  No videos to download with current filters.")
+        return
+    
+    # Apply limit (only if not downloading specific ID)
+    if limit and not id:
+        videos_to_download = videos_to_download[:limit]
+    
+    if not id:
+        click.echo(f"\n📊 Videos to download: {len(videos_to_download)}")
+        click.echo(f"Filters: category={category or 'all'}, undownloaded_only={undownloaded_only}")
+        click.echo(f"Download folder: {DOWNLOAD_DIR.absolute()}\n")
+    
+    success_count = 0
+    failed_count = 0
+    
+    # Launch Playwright browser with download settings
+    async with async_playwright() as p:
+        click.echo("🚀 Launching browser...")
+        
+        # Use persistent context (let downloads go to default ~/Downloads)
+        context = await p.chromium.launch_persistent_context(
+            str(BROWSER_STATE_DIR),
+            headless=headless,
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+            args=['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+            accept_downloads=True,
+        )
+        
+        # Get or create page
+        pages = context.pages
+        if pages:
+            page = pages[0]
+        else:
+            page = await context.new_page()
+        
+        # Process each video
+        for i, (vid_id, data) in enumerate(videos_to_download, 1):
+            click.echo(click.style(f"\n[{i}/{len(videos_to_download)}] {data['category'].upper()} - {vid_id}", fg='yellow'))
+            click.echo(f"  Description: {data.get('description', '')[:80]}...")
+            
+            try:
+                # Download video using Playwright
+                file_path = await download_video_playwright(page, vid_id)
+                
+                # Mark as downloaded
+                mark_as_downloaded(vid_id)
+                
+                success_count += 1
+                click.echo(click.style(f"  ✅ Success!", fg='green'))
+                
+            except Exception as e:
+                failed_count += 1
+                click.echo(click.style(f"  ❌ Failed: {e}", fg='red'))
+                traceback.print_exc()
+        
+        await context.close()
+    
+    # Summary
+    click.echo(click.style('\n' + '='*80, fg='blue'))
+    click.echo(click.style('SUMMARY', fg='blue', bold=True))
+    click.echo(click.style('='*80, fg='blue'))
+    click.echo(f"Successful: {success_count} ✅")
+    click.echo(f"Failed: {failed_count} ❌")
+    click.echo()
+
+@cli.command()
+@click.option('--category', '-c', default=None, help='Filter by category')
+@click.option('--limit', '-l', default=None, type=int, help='Limit number of videos to publish')
+@click.option('--id', '-i', default=None, help='Publish a specific video ID (ignores filters)')
+@click.option('--unpublished-only/--all', default=True, help='Only publish unpublished videos')
+@click.option('--mute-by-default/--no-mute', default=True, help='Mute videos by default')
+def publish(category, limit, id, unpublished_only, mute_by_default):
+    """Publish downloaded videos to AWS S3."""
+    click.echo(click.style('='*80, fg='green'))
+    click.echo(click.style('Video Publisher', fg='green', bold=True))
+    click.echo(click.style('='*80, fg='green'))
+    
+    # Load video IDs
+    all_videos = load_video_ids()
+    
+    if not all_videos:
+        click.echo("❌ No video IDs found. Run 'videos get' first.")
+        return
+    
+    # If specific ID is provided, only publish that one
+    if id:
+        if id not in all_videos:
+            click.echo(f"❌ Video ID {id} not found in storage.")
+            return
+        videos_to_publish = [(id, all_videos[id])]
+        click.echo(f"\n📍 Publishing specific video: {id}\n")
+    else:
+        # Filter videos - must be downloaded but not published
+        videos_to_publish = []
+        for vid_id, data in all_videos.items():
+            if category and data['category'] != category:
+                continue
+            if not data.get('downloaded', False):
+                click.echo(f"  ⏭️  Skipping {vid_id} (not downloaded yet)")
+                continue
+            if unpublished_only and data.get('published', False):
+                continue
+            videos_to_publish.append((vid_id, data))
+    
+    if not videos_to_publish:
+        click.echo("ℹ️  No downloaded videos to publish with current filters.")
+        click.echo("💡 Tip: Run 'videos download' first to download videos.")
+        return
+    
+    # Apply limit (only if not publishing specific ID)
+    if limit and not id:
+        videos_to_publish = videos_to_publish[:limit]
+    
+    if not id:
+        click.echo(f"\n📊 Videos to publish: {len(videos_to_publish)}")
+        click.echo(f"Filters: category={category or 'all'}, unpublished_only={unpublished_only}\n")
+    
+    success_count = 0
+    failed_count = 0
+    s3_urls = []
+    
+    for i, (vid_id, data) in enumerate(videos_to_publish, 1):
+        click.echo(click.style(f"\n[{i}/{len(videos_to_publish)}] {data['category'].upper()} - {vid_id}", fg='yellow'))
+        click.echo(f"  Description: {data.get('description', '')[:80]}...")
+        
+        try:
+            # Check if file exists locally
+            file_path = DOWNLOAD_DIR / f"{vid_id}.mp4"
+            if not file_path.exists():
+                click.echo(f"  ❌ File not found: {file_path}")
+                click.echo(f"  💡 Run 'videos download -i {vid_id}' first")
+                failed_count += 1
+                continue
+            
+            # Submit to S3 and DynamoDB via Lambda
+            click.echo(f"  ☁️  Uploading to S3...")
+            description = data.get('description', '')
+            # Use hashtags from TikTok, fallback to category
+            hashtags = data.get('hashtags', [])
+            if not hashtags:
+                category = data.get('category', '').lower()
+                hashtags = [category] if category else []
+            click.echo(f"  🏷️  Hashtags: {hashtags}")
+            video_id, s3_base_url = submit_media(str(file_path), description, hashtags, mute_by_default)
+            
+            # Mark as published
+            mark_as_published(vid_id)
+            
+            # Track S3 URL for polling (use the actual S3 base URL)
+            s3_url = f"{s3_base_url}/{video_id}"
+            s3_urls.append((vid_id, s3_url))
+            
+            success_count += 1
+            click.echo(click.style(f"  ✅ Success!", fg='green'))
+            
+        except Exception as e:
+            failed_count += 1
+            click.echo(click.style(f"  ❌ Failed: {e}", fg='red'))
+            traceback.print_exc()
+    
+    # Verify S3 uploads using AWS CLI
+    if s3_urls:
+        click.echo(click.style('\n' + '='*80, fg='cyan'))
+        click.echo(click.style('Verifying S3 Uploads', fg='cyan', bold=True))
+        click.echo(click.style('='*80, fg='cyan'))
+        
+        s3_client = boto3.client('s3', region_name='us-east-2')
+        
+        for vid_id, s3_url in s3_urls:
+            try:
+                # Parse bucket and key from URL
+                parts = s3_url.replace('https://', '').split('/')
+                bucket = parts[0].split('.')[0]  # Extract bucket name from subdomain
+                key = '/'.join(parts[1:])
+                
+                click.echo(f"  🔍 Checking s3://{bucket}/{key}")
+                
+                # Use head_object to check if file exists
+                s3_client.head_object(Bucket=bucket, Key=key)
+                click.echo(f"  ✅ {vid_id}: Available on S3")
+            except s3_client.exceptions.NoSuchKey:
+                click.echo(f"  ⚠️  {vid_id}: Not yet available")
+            except Exception as e:
+                click.echo(f"  ❌ {vid_id}: Failed to verify ({e})")
+    
+    # Summary
+    click.echo(click.style('\n' + '='*80, fg='green'))
+    click.echo(click.style('SUMMARY', fg='green', bold=True))
+    click.echo(click.style('='*80, fg='green'))
+    click.echo(f"Successful: {success_count} ✅")
+    click.echo(f"Failed: {failed_count} ❌")
+    if s3_urls:
+        click.echo(f"S3 URLs checked: {len(s3_urls)}")
+    click.echo()
+
+@cli.command()
+def dedupe():
+    """Remove duplicate video IDs from storage."""
+    click.echo("🔍 Checking for duplicates...")
+    
+    # Count lines in original file
+    original_line_count = 0
+    if STORAGE_FILE.exists():
+        with open(STORAGE_FILE, 'r') as f:
+            original_line_count = sum(1 for line in f if line.strip() and not line.startswith('#'))
+    
+    all_videos = load_video_ids()
+    unique_count = len(all_videos)
+    
+    # Rewrite file (load_video_ids already deduplicates via dict)
+    with open(STORAGE_FILE, 'w') as f:
+        for vid_id, data in sorted(all_videos.items(), key=lambda x: (x[1]['date'], x[1]['category'])):
+            f.write(json.dumps(data) + '\n')
+    
+    duplicates_removed = original_line_count - unique_count
+    
+    if duplicates_removed > 0:
+        click.echo(f"✅ Removed {duplicates_removed} duplicate(s)")
+    else:
+        click.echo(f"✅ No duplicates found")
+    
+    click.echo(f"Total unique videos: {unique_count}")
+
+@cli.command()
+@click.option('--category', '-c', default=None, help='Filter by category')
+@click.option('--downloaded/--not-downloaded', default=None, help='Filter by downloaded status')
+@click.option('--published/--unpublished', default=None, help='Filter by published status')
+def list(category, downloaded, published):
+    """List all stored video IDs."""
+    all_videos = load_video_ids()
+    
+    if not all_videos:
+        click.echo("No video IDs found.")
+        return
+    
+    # Group by category
+    by_category = {}
+    for vid_id, data in all_videos.items():
+        cat = data['category']
+        if category and cat != category:
+            continue
+        if downloaded is not None and data.get('downloaded', False) != downloaded:
+            continue
+        if published is not None and data.get('published', False) != published:
+            continue
+        
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append((vid_id, data))
+    
+    # Display
+    click.echo(click.style('='*80, fg='blue'))
+    click.echo(click.style('Stored Video IDs', fg='blue', bold=True))
+    click.echo(click.style('='*80, fg='blue'))
+    
+    total_count = 0
+    for cat in sorted(by_category.keys()):
+        videos = by_category[cat]
+        click.echo(click.style(f"\n{cat.upper()}", fg='cyan', bold=True))
+        click.echo(f"{'─'*80}")
+        
+        for vid_id, data in sorted(videos, key=lambda x: x[1]['date']):
+            # Status icons: 💾 = downloaded, ☁️ = published
+            downloaded_icon = "💾" if data.get('downloaded', False) else "⬜"
+            published_icon = "☁️" if data.get('published', False) else "⬜"
+            click.echo(f"  {downloaded_icon}{published_icon} {vid_id} | {data['date']} | {data.get('description', '')[:50]}")
+            total_count += 1
+    
+    click.echo(f"\n{'='*80}")
+    click.echo(f"Legend: 💾=Downloaded ☁️=Published")
+    click.echo(f"Total: {total_count} videos")
+    click.echo()
+
+if __name__ == '__main__':
+    cli()
+
