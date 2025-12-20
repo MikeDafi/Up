@@ -32,7 +32,7 @@ jobs:
         run: npm install
 
       - name: Init update
-        run: eas init --non-interactive --id ee49cdfd-2074-4d04-a576-12a25e22f8b2
+        run: eas init --non-interactive --id bd75a844-075d-4325-a99a-dc25a4a50d26
 
       - name: Publish update
         run: eas update --auto --non-interactive

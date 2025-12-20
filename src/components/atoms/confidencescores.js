@@ -1,6 +1,5 @@
 import { getHashtagConfidenceScoreMetadatasCache, updateHashtagConfidenceScoreMetadatasCache, setLastConfidenceScoreDecayTimestamp, getLastUploadHashtagTimestamp, setLastUploadHashtagTimestamp} from "./videoCacheStorage";
-import {getLastConfidenceScoreDecayTimestamp, getUUIDCache} from "./videoCacheStorage";
-import {updateUserData} from "./dynamodb";
+import {getLastConfidenceScoreDecayTimestamp} from "./videoCacheStorage";
 import {
   APPLY_DECAY_INTERVAL_MS,
   BACKUP_USER_DATA_INTERVAL_MS,
@@ -89,7 +88,7 @@ export const calculateAndUpdateConfidenceScoreCache = async (video_feed_type, ha
   try {
     await updateHashtagConfidenceScoreMetadatasCache(video_feed_type, topScores);
   } catch (error) {
-    console.error(`Failed to update confidence score for hashtag "${hashtag}":`, error);
+    console.error('Failed to update confidence scores:', error);
     return;
   }
 };
@@ -146,7 +145,6 @@ export const uploadHashtagConfidenceScores = async () => {
       return {};
     }
 
-    const uuid = await getUUIDCache();
     const payload = {};
     for (const video_feed_type of Object.values(VideoFeedType)) {
       const currentScoresMetadatas = await getHashtagConfidenceScoreMetadatasCache(video_feed_type);

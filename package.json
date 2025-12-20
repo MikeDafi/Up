@@ -6,7 +6,12 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "eslint . --quiet",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,mjs,cjs}": "eslint --quiet --fix"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -45,7 +50,9 @@
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.35.0",
     "eslint-plugin-react-native": "^4.1.0",
-    "globals": "^15.9.0"
+    "globals": "^15.9.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7"
   },
   "private": true
 }

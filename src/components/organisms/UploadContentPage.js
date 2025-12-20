@@ -1,4 +1,4 @@
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useState} from 'react';
 import {
   Keyboard,
   StyleSheet,
@@ -290,7 +290,7 @@ const UploadContentPage = () => {
                 <View style={styles.faqModal}>
                   <Text style={styles.faqTitle}>Frequently Asked Questions</Text>
                   <Text style={styles.faqItem}>Q: How do I upload a video?</Text>
-                  <Text style={styles.faqAnswer}>A: Click on "Pick a Video" and select a file from your device.</Text>
+                  <Text style={styles.faqAnswer}>A: Click on &quot;Pick a Video&quot; and select a file from your device.</Text>
 
                   <Text style={styles.faqItem}>Q: What happens if I mute the video?</Text>
                   <Text style={styles.faqAnswer}>A: The video will play without sound by default.</Text>

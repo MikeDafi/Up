@@ -1,0 +1,20 @@
+# Build outputs
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+.expo-shared/
+
+# Web build
+web-build/
+
+# Metro bundler
+.metro-health-check*
+
+# Assets
+assets/
+

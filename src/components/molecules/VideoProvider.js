@@ -1,5 +1,5 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Text, View, Alert, ActivityIndicator} from 'react-native';
+import React, {useEffect, useRef, useState} from 'react';
+import {Text, View, ActivityIndicator} from 'react-native';
 import PropTypes from 'prop-types';
 import {VideoContext} from '../atoms/contexts';
 
@@ -16,7 +16,6 @@ import { useIsFocused } from "@react-navigation/native";
 import {
   getVideoIndexIdealStateCache,
   getVideoMetadatasCache,
-  getSeenVideoMetadatasCache,
   setVideoIndexIdealStateCache,
   setVideoMetadatasCache,
   updateSeenVideoMetadatasCache,
@@ -142,7 +141,7 @@ const VideoProvider = ({children, video_feed_type}) => {
   const videoSlideFlatListRef = useRef(null);
   const videoSlideVideoRefs = useRef([]);
   const [videoMetadatas, setVideoMetadatas] = useState([]);
-  const [videoIndexIdealState, setVideoIndexIdealState] = useState(0);
+  const [, setVideoIndexIdealState] = useState(0);
   const [videoError, setVideoError] = useState("");
   const [videoIndexExternalView, setVideoIndexExternalView] = useState(0);
   const [checkedCache, setCheckedCache] = useState(false);

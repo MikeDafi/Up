@@ -19,17 +19,6 @@ import {
   VideoFeedType,
 } from '../atoms/constants';
 
-// Utility function to check if a video exists in S3
-const checkVideoExists = async (videoId) => {
-  try {
-    const response = await fetch(`${COMPRESSED_S3_BUCKET}/${videoId}`, { method: 'HEAD' });
-    return response.ok;
-  } catch (error) {
-    console.error(`Error checking video existence for ${videoId}:`, error);
-    return false;
-  }
-};
-
 const VideoSlide = () => {
   const {
     isMuted,
