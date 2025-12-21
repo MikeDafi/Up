@@ -19,6 +19,7 @@ import {
   setVideoIndexIdealStateCache,
   setVideoMetadatasCache,
   updateSeenVideoMetadatasCache,
+  getSeenVideoMetadatasCache,
   getUUIDCache
 } from '../atoms/videoCacheStorage';
 import {VideoMetadata} from '../atoms/VideoMetadata';
@@ -175,8 +176,16 @@ const VideoProvider = ({children, video_feed_type}) => {
 
 
   const keepUnSeenVideoMetadatas = async (videoMetadatas) => {
-    // Return all videos without filtering out seen ones
-    return videoMetadatas;
+    const seenVideoMetadatas = await getSeenVideoMetadatasCache();
+    const seenVideoIds = new Set(seenVideoMetadatas.map(v => v.videoId));
+    
+    const unseenVideos = videoMetadatas.filter(video => !seenVideoIds.has(video.videoId));
+    
+    if (unseenVideos.length < videoMetadatas.length) {
+      console.debug(`Filtered out ${videoMetadatas.length - unseenVideos.length} already-seen videos`);
+    }
+    
+    return unseenVideos;
   }
 
   const fetchNewVideos = async (isManual = false, setRefreshingVariable = true) => {

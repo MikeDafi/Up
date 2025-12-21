@@ -7,6 +7,7 @@ import {
   View,
   Text,
   ScrollView,
+  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { Video } from 'expo-av';
@@ -102,6 +103,12 @@ const VideoSlide = () => {
 
   return (
       <View style={styles.container}>
+        {/* Refresh indicator */}
+        {isRefreshing && (
+          <View style={styles.refreshIndicator}>
+            <ActivityIndicator size="large" color="#fff" />
+          </View>
+        )}
         <ScrollView
             ref={scrollViewRef}
             contentContainerStyle={styles.scrollContent}
@@ -114,7 +121,7 @@ const VideoSlide = () => {
               />
             }
             onScroll={handleScroll}
-            scrollEventThrottle={16} // Optimize scroll event frequency
+            scrollEventThrottle={16}
         >
           <FlatList
               ref={videoSlideFlatListRef}
@@ -150,6 +157,15 @@ const VideoSlide = () => {
 const styles = StyleSheet.create({
   container: {
     backgroundColor: 'transparent',
+    position: 'relative',
+  },
+  refreshIndicator: {
+    position: 'absolute',
+    top: 20,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 100,
   },
   videowaudioFeedContainer: {
     paddingBottom: PADDING_VIDEO_W_AUDIO_FEED,

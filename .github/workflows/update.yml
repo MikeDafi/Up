@@ -1,6 +1,11 @@
 name: Deploy to Staging
 
 on:
+  # Trigger on direct pushes to main
+  push:
+    branches:
+      - main
+  # Also trigger on PR merges to main
   pull_request:
     branches:
       - main
@@ -11,7 +16,8 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
+    # Run if: direct push to main OR merged PR
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     steps:
       - name: Check for EXPO_TOKEN
         run: |
@@ -40,4 +46,10 @@ jobs:
         run: npm install
 
       - name: Publish to Staging
-        run: eas update --branch staging --message "${{ github.event.pull_request.title }}"
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            MESSAGE="${{ github.event.head_commit.message }}"
+          else
+            MESSAGE="${{ github.event.pull_request.title }}"
+          fi
+          eas update --branch staging --message "$MESSAGE"
