@@ -21,7 +21,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.failco.Splytt"
+      "bundleIdentifier": "com.failco.Splytt",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {

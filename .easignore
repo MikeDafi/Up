@@ -1,0 +1,29 @@
+# Video retrieval - entire directory not needed for app build
+video_retrieval/
+
+# Build artifacts
+dist/
+web-build/
+
+# Test videos in assets
+assets/test_videos/
+
+# Large media files not needed for build
+*.mp4
+*.mov
+
+# Documentation
+*.md
+!README.md
+
+# Development files
+.cursor/
+.github/
+scripts/
+
+# AWS Lambda functions - not needed for mobile build
+aws/
+
+# Config files not needed for build
+configs/
+

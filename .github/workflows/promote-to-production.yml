@@ -50,7 +50,12 @@ jobs:
             echo "update_id=${{ inputs.update_group_id }}" >> $GITHUB_OUTPUT
           else
             # Get the latest update from staging branch
-            LATEST=$(eas update:list --branch staging --limit 1 --json --non-interactive | jq -r '.[0].group')
+            # Format: { name, id, currentPage: [{ group, ... }] }
+            LATEST=$(eas update:list --branch staging --limit 1 --json --non-interactive | jq -r '.currentPage[0].group')
+            if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+              echo "❌ No staging updates found. Deploy to staging first."
+              exit 1
+            fi
             echo "update_id=$LATEST" >> $GITHUB_OUTPUT
             echo "Latest staging update: $LATEST"
           fi
