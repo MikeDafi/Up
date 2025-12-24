@@ -21,6 +21,7 @@ video_retrieval/videos
 
 | Command | Purpose | Example |
 |---------|---------|---------|
+| `login` | Open browser for TikTok login | `./videos login` |
 | `get` | Scrape video IDs from TikTok | `./videos get -c fitness -n 5` |
 | `list` | Show all stored videos | `./videos list` |
 | `download` | Download videos locally | `./videos download --undownloaded-only` |
@@ -28,6 +29,16 @@ video_retrieval/videos
 | `dedupe` | Remove duplicate entries | `./videos dedupe` |
 
 ## Commands
+
+### 0. Login to TikTok (`login`)
+
+**Run this first if you haven't logged in or your session expired.**
+
+```bash
+./video_retrieval/videos login
+```
+
+This opens a browser window to TikTok's login page. Log in manually (Google, phone, etc.), wait for the feed to load, then press Enter in the terminal. Your session is saved in `browser_state/` for future commands.
 
 ### 1. Scrape Videos (`get`)
 
@@ -38,8 +49,8 @@ video_retrieval/videos
 # Multiple categories
 ./video_retrieval/videos get -c fitness,dance,comedy -n 3
 
-# With hashtag extraction (slower but more accurate)
-./video_retrieval/videos get -c fitness -n 3 --extract-hashtags
+# With details extraction (slower but gets hashtags + descriptions)
+./video_retrieval/videos get -c fitness -n 3 --extract-details
 
 # Headless mode (no browser window)
 ./video_retrieval/videos get -c trending -n 10 --headless
@@ -48,7 +59,7 @@ video_retrieval/videos
 **Options:**
 - `-c, --categories TEXT` - Comma-separated categories (default: trending,comedy,dance)
 - `-n, --count INTEGER` - Videos per category (default: 10)
-- `-e, --extract-hashtags` - Visit each video page to extract real hashtags
+- `-e, --extract-details` - Visit each video page to extract hashtags and description
 - `--headless` - Run browser without UI
 
 ### 2. List Videos (`list`)
@@ -128,8 +139,11 @@ video_retrieval/videos
 ## End-to-End Workflow
 
 ```bash
-# 1. Scrape videos with hashtags
-./video_retrieval/videos get -c fitness,comedy -n 5 --extract-hashtags
+# 0. Login to TikTok (first time or if session expired)
+./video_retrieval/videos login
+
+# 1. Scrape videos with details (hashtags + descriptions)
+./video_retrieval/videos get -c fitness,comedy -n 5 --extract-details
 
 # 2. Verify scraped videos
 ./video_retrieval/videos list
@@ -185,13 +199,20 @@ Common categories to use:
 ## Troubleshooting
 
 ### Videos not appearing in app feed?
-- Re-scrape with `--extract-hashtags` flag
+- Re-scrape with `--extract-details` flag
 - Check DynamoDB `up-videometadata` table for hashtags
+
+### Scraping fails or shows captcha?
+```bash
+# Login again to refresh session
+./video_retrieval/videos login
+```
 
 ### Download fails?
 ```bash
-# Clear browser state and retry
+# Clear browser state and login again
 rm -rf video_retrieval/browser_state/
+./video_retrieval/videos login
 ./video_retrieval/videos download --undownloaded-only
 ```
 

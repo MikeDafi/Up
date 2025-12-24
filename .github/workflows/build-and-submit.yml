@@ -1,0 +1,71 @@
+name: Build and Submit to App Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'App version (e.g., 1.1.0) - leave empty to keep current'
+        required: false
+        type: string
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  build-and-submit:
+    name: Build iOS and Submit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for EXPO_TOKEN
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "You must provide an EXPO_TOKEN secret"
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Update version in app.json
+        if: ${{ inputs.version != '' }}
+        run: |
+          # Update version in app.json
+          jq '.expo.version = "${{ inputs.version }}"' app.json > tmp.json && mv tmp.json app.json
+          echo "Updated version to ${{ inputs.version }}"
+          cat app.json | jq '.expo.version'
+
+      - name: Build and Submit iOS
+        run: |
+          eas build --platform ios --profile ${{ inputs.profile }} --auto-submit --non-interactive
+
+      - name: Summary
+        run: |
+          echo "✅ Build submitted to App Store Connect!"
+          echo "Profile: ${{ inputs.profile }}"
+          echo "Version: ${{ inputs.version || 'unchanged' }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Wait for processing in App Store Connect (~10-30 min)"
+          echo "2. Configure TestFlight compliance"
+          echo "3. Add testers"
+

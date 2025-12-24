@@ -24,6 +24,3 @@ scripts/
 # AWS Lambda functions - not needed for mobile build
 aws/
 
-# Config files not needed for build
-configs/
-

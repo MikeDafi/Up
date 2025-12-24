@@ -28,12 +28,12 @@
   "submit": {
     "staging": {
       "ios": {
-        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID"
+        "ascAppId": "6756838149"
       }
     },
     "production": {
       "ios": {
-        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID"
+        "ascAppId": "6756838149"
       }
     }
   }

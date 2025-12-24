@@ -11,6 +11,7 @@ import asyncio
 import click
 import json
 import sys
+import select
 import traceback
 import os
 import subprocess
@@ -450,8 +451,8 @@ def mark_as_published(video_id):
     
     return True
 
-async def get_video_hashtags(page, video_id, debug=False):
-    """Visit individual video page to extract hashtags."""
+async def get_video_details(page, video_id, debug=False):
+    """Visit individual video page to extract details (hashtags and description)."""
     try:
         video_url = f"https://www.tiktok.com/@x/video/{video_id}"
         if debug:
@@ -466,15 +467,80 @@ async def get_video_hashtags(page, video_id, debug=False):
             await page.screenshot(path=screenshot_path)
             click.echo(f"📸 Screenshot saved: {screenshot_path}")
         
-        # Extract hashtags from video page with detailed logging
-        hashtags = await page.evaluate("""
+        # Extract video details (hashtags and description) from video page
+        result = await page.evaluate("""
             (debug) => {
                 const tags = [];
+                let description = '';
                 
                 if (debug) {
-                    console.log('=== DEBUGGING HASHTAG EXTRACTION ===');
+                    console.log('=== EXTRACTING VIDEO DETAILS ===');
                     console.log('Page URL:', window.location.href);
                 }
+                
+                // === EXTRACT DESCRIPTION ===
+                // Priority order: prefer data-e2e elements over meta tags
+                const descSelectors = [
+                    '[data-e2e="browse-video-desc"]',
+                    '[data-e2e="video-desc"]',
+                    'div[data-e2e*="desc"]',
+                    'span[data-e2e*="desc"]',
+                    'h1[data-e2e="browse-video-desc"]'
+                ];
+                
+                // First try data-e2e selectors (cleaner content)
+                for (const selector of descSelectors) {
+                    const el = document.querySelector(selector);
+                    if (el) {
+                        let text = (el.textContent || '').trim();
+                        if (text && text.length > description.length) {
+                            description = text;
+                            if (debug) console.log(`Found description via ${selector}: ${text.substring(0, 100)}`);
+                        }
+                    }
+                }
+                
+                // Also try h1 elements
+                const h1Elements = document.querySelectorAll('h1');
+                h1Elements.forEach((el) => {
+                    const text = (el.textContent || '').trim();
+                    // Only use if it looks like a caption (not too long, no metadata patterns)
+                    if (text && text.length > description.length && text.length < 300) {
+                        // Skip if it looks like meta description
+                        if (!text.match(/^\d+\s*(Likes|Views|Comments)/i)) {
+                            description = text;
+                            if (debug) console.log(`Found description in h1: ${text.substring(0, 100)}`);
+                        }
+                    }
+                });
+                
+                // Only use meta tags as last resort if no description found
+                if (!description) {
+                    const metaDesc = document.querySelector('meta[property="og:description"]');
+                    if (metaDesc) {
+                        let text = metaDesc.getAttribute('content') || '';
+                        // Clean meta description - remove "X Likes, TikTok video from USER (@handle):" prefix
+                        text = text.replace(/^\d+\s*(Likes|Views),?\s*TikTok\s+video\s+from\s+[^:]+:\s*/i, '');
+                        // Remove the surrounding quotes if present
+                        text = text.replace(/^[""\u201c]|[""\u201d]$/g, '').trim();
+                        description = text;
+                    }
+                }
+                
+                // Clean up description
+                let cleanDescription = description;
+                // Remove trailing hashtags
+                cleanDescription = cleanDescription.replace(/(\s*#[\w\u0080-\uFFFF]+)+\s*$/g, '').trim();
+                // Remove trailing sound attribution like "original sound - username"
+                cleanDescription = cleanDescription.replace(/\.\s*original sound\s*-\s*[\w\s]+\.?$/i, '').trim();
+                // Remove leading/trailing quotes
+                cleanDescription = cleanDescription.replace(/^[""\u201c]|[""\u201d]$/g, '').trim();
+                // Truncate to reasonable length
+                cleanDescription = cleanDescription.substring(0, 200);
+                
+                if (debug) console.log(`Final description: ${cleanDescription.substring(0, 200)}`);
+                
+                // === EXTRACT HASHTAGS ===
                 
                 // 1. Look for hashtag links
                 const hashtagLinks = document.querySelectorAll('a[href*="/tag/"]');
@@ -490,9 +556,7 @@ async def get_video_hashtags(page, video_id, debug=False):
                     }
                 });
                 
-                // 2. Look in h1 title
-                const h1Elements = document.querySelectorAll('h1');
-                if (debug) console.log(`Found ${h1Elements.length} h1 elements`);
+                // 2. Look in h1 title for hashtags
                 h1Elements.forEach((el, i) => {
                     const text = el.textContent || '';
                     if (debug && i < 5) console.log(`H1 ${i}: ${text.substring(0, 100)}`);
@@ -505,15 +569,8 @@ async def get_video_hashtags(page, video_id, debug=False):
                     }
                 });
                 
-                // 3. Look for description elements
-                const descSelectors = [
-                    '[data-e2e="browse-video-desc"]',
-                    '[data-e2e="video-desc"]',
-                    'div[data-e2e*="desc"]',
-                    'span[data-e2e*="desc"]'
-                ];
-                
-                descSelectors.forEach(selector => {
+                // 3. Look for hashtags in description elements
+                descSelectors.slice(0, 4).forEach(selector => {
                     const elements = document.querySelectorAll(selector);
                     if (debug && elements.length > 0) console.log(`Found ${elements.length} elements for selector: ${selector}`);
                     elements.forEach((el, i) => {
@@ -542,18 +599,27 @@ async def get_video_hashtags(page, video_id, debug=False):
                 const uniqueTags = [...new Set(tags)];
                 if (debug) console.log(`Total unique hashtags found: ${uniqueTags.length}`, uniqueTags);
                 
-                return uniqueTags;
+                return {
+                    hashtags: uniqueTags,
+                    description: cleanDescription.substring(0, 500)
+                };
             }
         """, debug)
         
-        return hashtags if hashtags else []
+        return result if result else {'hashtags': [], 'description': ''}
     except Exception as e:
         if debug:
             click.echo(f"❌ Error: {e}")
-        return []
+        return {'hashtags': [], 'description': ''}
 
-async def scrape_video_ids(page, count=10, extract_hashtags=False):
-    """Scrape video IDs from current TikTok page."""
+async def scrape_video_ids(page, count=10, extract_details=False, existing_ids=None):
+    """Scrape video IDs from current TikTok page.
+    
+    Args:
+        existing_ids: Set of video IDs to skip (already in storage)
+    """
+    if existing_ids is None:
+        existing_ids = set()
     try:
         # Wait for page to fully load
         click.echo(f"  ⏳ Waiting for content...")
@@ -659,20 +725,33 @@ async def scrape_video_ids(page, count=10, extract_hashtags=False):
         else:
             click.echo(f"  ⚠️  No video IDs found")
         
+        # Filter out videos that already exist in storage
+        if existing_ids and video_data:
+            original_count = len(video_data)
+            video_data = [v for v in video_data if v['id'] not in existing_ids]
+            skipped = original_count - len(video_data)
+            if skipped > 0:
+                click.echo(f"  ⏭️  Skipped {skipped} videos (already in storage)")
+        
         # Limit to requested count
         video_data = video_data[:count]
         
-        # Optionally visit each video to get hashtags
-        if extract_hashtags and video_data:
-            click.echo(f"  🏷️  Extracting hashtags from {len(video_data)} videos...")
+        # Optionally visit each video to get hashtags and description
+        if extract_details and video_data:
+            click.echo(f"  🏷️  Extracting details from {len(video_data)} videos...")
             for i, video in enumerate(video_data, 1):
                 click.echo(f"     [{i}/{len(video_data)}] Visiting video {video['id']}...")
                 # Enable debug mode for first video only
                 debug = (i == 1)
-                hashtags = await get_video_hashtags(page, video['id'], debug=debug)
-                video['hashtags'] = hashtags
-                if hashtags:
-                    click.echo(f"        ✅ Found: #{', #'.join(hashtags[:5])}")
+                details = await get_video_details(page, video['id'], debug=debug)
+                video['hashtags'] = details.get('hashtags', [])
+                # Update description if we got a better one from the video page
+                page_desc = details.get('description', '')
+                if page_desc and len(page_desc) > len(video.get('desc', '')):
+                    video['desc'] = page_desc
+                    click.echo(f"        📝 Description: {page_desc[:60]}...")
+                if video['hashtags']:
+                    click.echo(f"        ✅ Hashtags: #{', #'.join(video['hashtags'][:5])}")
                 else:
                     click.echo(f"        ⚠️  No hashtags found")
                 await asyncio.sleep(1)  # Be nice to TikTok
@@ -690,15 +769,101 @@ def cli():
     pass
 
 @cli.command()
+@click.option('--timeout', '-t', default=120, help='Seconds to wait for login (default: 120)')
+def login(timeout):
+    """Open browser to TikTok for manual login. Run this first if not logged in."""
+    asyncio.run(login_to_tiktok(timeout))
+
+async def login_to_tiktok(timeout):
+    """Open browser and wait for user to log in to TikTok."""
+    click.echo(click.style('='*80, fg='cyan'))
+    click.echo(click.style('TikTok Login', fg='cyan', bold=True))
+    click.echo(click.style('='*80, fg='cyan'))
+    click.echo("\n🔐 Opening browser for TikTok login...")
+    click.echo(f"   You have {timeout} seconds to log in.\n")
+    
+    async with async_playwright() as p:
+        # Create browser state directory if it doesn't exist
+        BROWSER_STATE_DIR.mkdir(exist_ok=True)
+        
+        # Use persistent context to save login/cookies
+        context = await p.chromium.launch_persistent_context(
+            str(BROWSER_STATE_DIR),
+            headless=False,
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+            args=['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+        )
+        
+        # Get or create page
+        pages = context.pages
+        if pages:
+            page = pages[0]
+        else:
+            page = await context.new_page()
+        
+        # Navigate to TikTok login
+        await page.goto('https://www.tiktok.com/login', wait_until='networkidle')
+        
+        click.echo("🌐 Browser opened to TikTok login page.")
+        click.echo("   1. Log in with your account (Google, phone, etc.)")
+        click.echo("   2. Wait for the feed to load")
+        click.echo(f"   3. Type 'y' and press Enter when done (or wait {timeout}s)\n")
+        
+        # Wait for user input with timeout
+        click.echo(click.style("Type 'y' when logged in: ", fg='yellow'), nl=False)
+        sys.stdout.flush()
+        
+        # Poll for input with timeout
+        start_time = time.time()
+        user_confirmed = False
+        
+        while time.time() - start_time < timeout:
+            # Check if there's input available (works on Unix)
+            if sys.stdin in select.select([sys.stdin], [], [], 1)[0]:
+                line = sys.stdin.readline().strip().lower()
+                if line == 'y' or line == 'yes':
+                    user_confirmed = True
+                    break
+            
+            # Print countdown every 30 seconds
+            elapsed = int(time.time() - start_time)
+            remaining = timeout - elapsed
+            if elapsed > 0 and elapsed % 30 == 0:
+                click.echo(f"\n⏳ {remaining} seconds remaining...")
+                click.echo(click.style("Type 'y' when logged in: ", fg='yellow'), nl=False)
+                sys.stdout.flush()
+        
+        if user_confirmed:
+            click.echo("\n✅ Login confirmed!")
+        else:
+            click.echo(f"\n⏰ Timeout reached ({timeout}s). Saving session anyway...")
+        
+        # Verify login by checking for profile elements
+        try:
+            await page.goto('https://www.tiktok.com', wait_until='networkidle')
+            await asyncio.sleep(2)
+            click.echo("✅ Session saved!")
+        except Exception as e:
+            click.echo(f"⚠️  Could not verify login: {e}")
+        
+        await context.close()
+    
+    click.echo(click.style('\n' + '='*80, fg='cyan'))
+    click.echo("🎉 Done! Your login session is saved in browser_state/")
+    click.echo("   You can now run: ./videos get -c trending -n 5")
+    click.echo(click.style('='*80 + '\n', fg='cyan'))
+
+@cli.command()
 @click.option('--categories', '-c', default='trending,comedy,dance', help='Comma-separated categories')
 @click.option('--count', '-n', default=10, help='Videos per category')
 @click.option('--headless', is_flag=True, help='Run browser in headless mode')
-@click.option('--extract-hashtags', '-e', is_flag=True, help='Visit each video page to extract hashtags (slower)')
-def get(categories, count, headless, extract_hashtags):
+@click.option('--extract-details', '-e', is_flag=True, help='Visit each video page to extract hashtags and description (slower)')
+def get(categories, count, headless, extract_details):
     """Scrape video IDs from TikTok and store them."""
-    asyncio.run(get_videos(categories, count, headless, extract_hashtags))
+    asyncio.run(get_videos(categories, count, headless, extract_details))
 
-async def get_videos(categories_str, count, headless, extract_hashtags):
+async def get_videos(categories_str, count, headless, extract_details):
     """Async function to scrape videos."""
     categories_list = [c.strip() for c in categories_str.split(',')]
     
@@ -708,8 +873,13 @@ async def get_videos(categories_str, count, headless, extract_hashtags):
     click.echo(f"\nCategories: {', '.join(categories_list)}")
     click.echo(f"Videos per category: {count}")
     click.echo(f"Headless: {headless}")
-    click.echo(f"Extract hashtags: {extract_hashtags}")
+    click.echo(f"Extract details: {extract_details}")
     click.echo(f"Storage: {STORAGE_FILE}\n")
+    
+    # Load existing video IDs to avoid duplicates
+    existing_videos = load_video_ids()
+    existing_ids = set(existing_videos.keys())
+    click.echo(f"📦 Loaded {len(existing_ids)} existing video IDs from storage\n")
     
     total_new = 0
     total_duplicates = 0
@@ -770,7 +940,7 @@ async def get_videos(categories_str, count, headless, extract_hashtags):
             
             # Scrape videos
             click.echo(f"  🔍 Scraping video IDs...")
-            videos = await scrape_video_ids(page, count, extract_hashtags)
+            videos = await scrape_video_ids(page, count, extract_details, existing_ids)
             
             if not videos:
                 click.echo(f"  ⚠️  No videos found")
@@ -786,6 +956,8 @@ async def get_videos(categories_str, count, headless, extract_hashtags):
                 hashtags = video.get('hashtags', [])
                 if save_video_id(video['id'], category_name, video.get('desc', ''), hashtags):
                     new_count += 1
+                    # Add to existing_ids so we don't re-scrape in later categories
+                    existing_ids.add(video['id'])
                     hashtag_str = f" #{' #'.join(hashtags)}" if hashtags else ""
                     click.echo(f"    ✅ {video['id']}{hashtag_str} - {video.get('desc', '')[:50]}...")
                 else:
