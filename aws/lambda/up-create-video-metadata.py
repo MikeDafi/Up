@@ -64,11 +64,15 @@ def lambda_handler(event, context):
         region = body.get('region', 'NA')
         country = body.get('country', 'NA')
 
+        # Extract date partition (YYYY-MM-DD) for efficient cleanup queries
+        date_partition = uploaded_at[:10]  # "2025-12-25T10:30:00" -> "2025-12-25"
+
         # Prepare the item to insert into DynamoDB
         item = {
             "videoId": video_id,
             "description": remove_hashtags(description),
             "uploadedAt": uploaded_at,
+            "datePartition": date_partition,  # For GSI-based cleanup queries
             "hashtags": hashtags,
             "muteByDefault": mute_by_default,
             "city": city, 

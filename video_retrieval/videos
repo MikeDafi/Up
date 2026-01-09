@@ -435,14 +435,24 @@ def mark_as_downloaded(video_id):
     
     return True
 
-def mark_as_published(video_id):
-    """Mark a video ID as published."""
+def mark_as_published(video_id, cleanup=False):
+    """Mark a video ID as published. Optionally cleanup local file."""
     existing = load_video_ids()
     
     if video_id not in existing:
         return False
     
     existing[video_id]['published'] = True
+    
+    # Cleanup: set downloaded to False and delete local file
+    if cleanup:
+        existing[video_id]['downloaded'] = False
+        local_file = DOWNLOAD_DIR / f"{video_id}.mp4"
+        if local_file.exists():
+            try:
+                local_file.unlink()
+            except Exception as e:
+                click.echo(f"  ⚠️  Could not delete {local_file}: {e}")
     
     # Rewrite entire file
     with open(STORAGE_FILE, 'w') as f:
@@ -1101,7 +1111,8 @@ async def download_videos(category, limit, id, undownloaded_only, headless):
 @click.option('--id', '-i', default=None, help='Publish a specific video ID (ignores filters)')
 @click.option('--unpublished-only/--all', default=True, help='Only publish unpublished videos')
 @click.option('--mute-by-default/--no-mute', default=True, help='Mute videos by default')
-def publish(category, limit, id, unpublished_only, mute_by_default):
+@click.option('--cleanup/--no-cleanup', default=True, help='Delete local file after publish')
+def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
     """Publish downloaded videos to AWS S3."""
     click.echo(click.style('='*80, fg='green'))
     click.echo(click.style('Video Publisher', fg='green', bold=True))
@@ -1175,8 +1186,10 @@ def publish(category, limit, id, unpublished_only, mute_by_default):
             click.echo(f"  🏷️  Hashtags: {hashtags}")
             video_id, s3_base_url = submit_media(str(file_path), description, hashtags, mute_by_default)
             
-            # Mark as published
-            mark_as_published(vid_id)
+            # Mark as published and cleanup local file if requested
+            mark_as_published(vid_id, cleanup=cleanup)
+            if cleanup:
+                click.echo(f"  🗑️  Cleaned up local file")
             
             # Track S3 URL for polling (use the actual S3 base URL)
             s3_url = f"{s3_base_url}/{video_id}"

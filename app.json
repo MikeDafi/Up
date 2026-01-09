@@ -23,7 +23,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.failco.Splytt",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Splytt needs access to your photo library so you can select videos from your camera roll to upload and share with the community."
       }
     },
     "android": {
