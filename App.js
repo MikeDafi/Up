@@ -7,11 +7,14 @@ import { Image, StyleSheet, View, Text } from 'react-native';
 import { applyDecayToAllConfidenceScores } from "./src/components/atoms/confidencescores";
 import { aggregateUpdateUserData } from "./src/components/atoms/user_functions";
 import { isTrustedDevice } from "./src/components/atoms/attestation";
+import { hasAcceptedEULA, acceptEULA } from "./src/components/atoms/moderation";
+import EULAScreen from "./src/components/molecules/EULAScreen";
 
 const Tab = createBottomTabNavigator();
 
 export default function App() {
   const [trusted, setTrusted] = useState(null); // null: loading, false: blocked, true: continue
+  const [eulaAccepted, setEulaAccepted] = useState(null); // null: loading, false: show EULA, true: continue
 
   useEffect(() => {
     const checkDeviceTrust = async () => {
@@ -19,11 +22,17 @@ export default function App() {
       setTrusted(trusted);
 
       if (trusted) {
-        try {
-          await applyDecayToAllConfidenceScores();
-          await aggregateUpdateUserData();
-        } catch (error) {
-          console.error('Error during initialization:', error);
+        // Check EULA acceptance
+        const accepted = await hasAcceptedEULA();
+        setEulaAccepted(accepted);
+
+        if (accepted) {
+          try {
+            await applyDecayToAllConfidenceScores();
+            await aggregateUpdateUserData();
+          } catch (error) {
+            console.error('Error during initialization:', error);
+          }
         }
       }
     };
@@ -31,7 +40,20 @@ export default function App() {
     checkDeviceTrust();
   }, []);
 
-  if (trusted === null) {
+  const handleEULAAccept = async () => {
+    await acceptEULA();
+    setEulaAccepted(true);
+    
+    // Run initialization after EULA acceptance
+    try {
+      await applyDecayToAllConfidenceScores();
+      await aggregateUpdateUserData();
+    } catch (error) {
+      console.error('Error during initialization:', error);
+    }
+  };
+
+  if (trusted === null || (trusted && eulaAccepted === null)) {
     return null; // or splash screen / loading indicator
   }
 
@@ -41,6 +63,10 @@ export default function App() {
           <Text style={styles.blockedText}>⚠️ Device not supported.</Text>
         </View>
     );
+  }
+
+  if (!eulaAccepted) {
+    return <EULAScreen onAccept={handleEULAAccept} />;
   }
 
   return (

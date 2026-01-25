@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Splytt Privacy Policy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-card: #1a1a24;
+            --text-primary: #f5f5f7;
+            --text-secondary: #a1a1aa;
+            --accent: #6366f1;
+            --border: #27272a;
+        }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.7;
+        }
+
+        .gradient-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 600px;
+            background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.15), transparent);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 60px 24px;
+            position: relative;
+            z-index: 1;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+
+        .logo {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, var(--accent), #a855f7);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 28px;
+            font-weight: 700;
+            color: white;
+            box-shadow: 0 8px 32px rgba(99, 102, 241, 0.3);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .last-updated {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 24px;
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h2 span { font-size: 1.3rem; }
+
+        p {
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+        }
+
+        ul {
+            list-style: none;
+            margin-bottom: 16px;
+        }
+
+        ul li {
+            color: var(--text-secondary);
+            padding: 6px 0;
+            padding-left: 24px;
+            position: relative;
+        }
+
+        ul li::before {
+            content: "•";
+            position: absolute;
+            left: 8px;
+            color: var(--accent);
+            font-weight: bold;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        th {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        @media (max-width: 640px) {
+            .container { padding: 40px 20px; }
+            h1 { font-size: 2rem; }
+            .section { padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="gradient-bg"></div>
+    
+    <div class="container">
+        <header>
+            <div class="logo">S</div>
+            <h1>Privacy Policy</h1>
+            <p class="last-updated">Last Updated: January 21, 2026</p>
+        </header>
+
+        <section class="section">
+            <h2><span>📋</span> Introduction</h2>
+            <p>Splytt ("we," "our," or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, and safeguard your information when you use our mobile application Splytt ("the App").</p>
+            <p>By using the App, you agree to the collection and use of information in accordance with this policy.</p>
+        </section>
+
+        <section class="section">
+            <h2><span>📊</span> Information We Collect</h2>
+            <h3 style="margin-top: 0;">Information Collected Automatically</h3>
+            <p>When you use Splytt, we automatically collect:</p>
+            <ul>
+                <li><strong>Device Identifier:</strong> A randomly generated unique identifier (UUID) stored locally on your device</li>
+                <li><strong>Video Viewing History:</strong> Information about which videos you have watched</li>
+                <li><strong>Content Preferences:</strong> Hashtag preferences and confidence scores from your viewing behavior</li>
+                <li><strong>Usage Data:</strong> General app usage patterns to improve our service</li>
+            </ul>
+            
+            <h3>Information You Provide</h3>
+            <ul>
+                <li><strong>Uploaded Content:</strong> Videos and associated metadata (hashtags, descriptions) you choose to upload</li>
+                <li><strong>Reports:</strong> Information you provide when reporting content or users</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <h2><span>🎯</span> How We Use Your Information</h2>
+            <ul>
+                <li><strong>Personalize Your Feed:</strong> Recommend videos based on your viewing history and preferences</li>
+                <li><strong>Prevent Duplicate Content:</strong> Track watched videos to show you fresh content</li>
+                <li><strong>Improve Our Service:</strong> Analyze usage patterns to enhance the app experience</li>
+                <li><strong>Process Uploads:</strong> Store and distribute content you choose to share</li>
+                <li><strong>Content Moderation:</strong> Review reported content and maintain community safety</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <h2><span>💾</span> Data Storage</h2>
+            <ul>
+                <li><strong>Local Storage:</strong> Your viewing history, preferences, and device identifier are stored locally on your device</li>
+                <li><strong>Cloud Storage:</strong> Uploaded videos are stored on Amazon Web Services (AWS) S3 servers in the United States</li>
+                <li><strong>Database:</strong> Video metadata and anonymized user preferences are stored in AWS DynamoDB</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <h2><span>🤝</span> Data Sharing</h2>
+            <p>We do <strong>not</strong> sell, trade, or rent your personal information to third parties.</p>
+            <p>We may share information only in the following circumstances:</p>
+            <ul>
+                <li><strong>Service Providers:</strong> We use AWS for hosting and storage services</li>
+                <li><strong>Legal Requirements:</strong> If required by law or to protect our rights</li>
+                <li><strong>Safety:</strong> To protect the safety of our users or the public</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <h2><span>⏰</span> Data Retention</h2>
+            <ul>
+                <li><strong>Local Data:</strong> Stored on your device until you uninstall the app or clear app data</li>
+                <li><strong>Viewing History:</strong> Limited to the most recent 1,000 videos watched</li>
+                <li><strong>Uploaded Content:</strong> Retained until you request deletion</li>
+                <li><strong>Reports:</strong> Retained for moderation purposes and legal compliance</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <h2><span>✅</span> Your Rights</h2>
+            <p>You have the right to:</p>
+            <ul>
+                <li><strong>Access:</strong> Request information about data we have collected</li>
+                <li><strong>Delete:</strong> Request deletion of your data by contacting us</li>
+                <li><strong>Opt-Out:</strong> Uninstall the app to stop all data collection</li>
+                <li><strong>Block Users:</strong> Block users to prevent seeing their content</li>
+                <li><strong>Report Content:</strong> Report objectionable content for review</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <h2><span>👶</span> Children's Privacy</h2>
+            <p>Splytt is not intended for children under 13 years of age. We do not knowingly collect personal information from children under 13. If you are a parent or guardian and believe your child has provided us with personal information, please contact us.</p>
+        </section>
+
+        <section class="section">
+            <h2><span>🔐</span> Security</h2>
+            <p>We implement reasonable security measures to protect your information:</p>
+            <ul>
+                <li>Secure HTTPS connections for all data transmission</li>
+                <li>AWS security infrastructure for cloud storage</li>
+                <li>Local device encryption for stored preferences</li>
+            </ul>
+        </section>
+
+        <section class="section">
+            <h2><span>📱</span> Third-Party Services</h2>
+            <p>The App uses the following third-party services:</p>
+            <ul>
+                <li><strong>Amazon Web Services (AWS):</strong> Cloud infrastructure and storage</li>
+                <li><strong>Expo:</strong> App development and update distribution</li>
+            </ul>
+            <p>These services have their own privacy policies governing their use of data.</p>
+        </section>
+
+        <section class="section">
+            <h2><span>📝</span> Data Collection Summary</h2>
+            <table>
+                <tr>
+                    <th>Data Type</th>
+                    <th>Collected</th>
+                    <th>Purpose</th>
+                    <th>Shared</th>
+                </tr>
+                <tr>
+                    <td>Device ID (UUID)</td>
+                    <td>Yes</td>
+                    <td>Personalization</td>
+                    <td>No</td>
+                </tr>
+                <tr>
+                    <td>Viewing History</td>
+                    <td>Yes</td>
+                    <td>Prevent duplicates</td>
+                    <td>No</td>
+                </tr>
+                <tr>
+                    <td>Content Preferences</td>
+                    <td>Yes</td>
+                    <td>Recommendations</td>
+                    <td>No</td>
+                </tr>
+                <tr>
+                    <td>Uploaded Videos</td>
+                    <td>Yes</td>
+                    <td>Content sharing</td>
+                    <td>Public</td>
+                </tr>
+                <tr>
+                    <td>Reports</td>
+                    <td>Yes</td>
+                    <td>Moderation</td>
+                    <td>No</td>
+                </tr>
+            </table>
+        </section>
+
+        <section class="section">
+            <h2><span>🔄</span> Changes to This Policy</h2>
+            <p>We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy in the App and updating the "Last Updated" date.</p>
+        </section>
+
+        <section class="section">
+            <h2><span>📧</span> Contact Us</h2>
+            <p>If you have questions about this Privacy Policy, please contact us at:</p>
+            <p><strong>Email:</strong> <a href="mailto:maskndafi@gmail.com" style="color: var(--accent);">maskndafi@gmail.com</a></p>
+        </section>
+
+        <footer>
+            <p>© 2026 Splytt. All rights reserved.</p>
+            <p style="margin-top: 8px;">
+                <a href="index.html">Support</a> · 
+                <a href="terms.html">Terms of Service</a>
+            </p>
+        </footer>
+    </div>
+</body>
+</html>
+

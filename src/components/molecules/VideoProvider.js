@@ -25,6 +25,7 @@ import {
 import {VideoMetadata} from '../atoms/VideoMetadata';
 import {calculateAndUpdateConfidenceScoreCache} from "../atoms/confidencescores";
 import TemporaryWarningBanner from "./TemporaryWarningBanner";
+import {getBlockedUsers} from '../atoms/moderation';
 
 /**
  * Track video assignments across feeds to prevent duplicates during concurrent fetches.
@@ -188,6 +189,29 @@ const VideoProvider = ({children, video_feed_type}) => {
     return unseenVideos;
   }
 
+  const filterBlockedContent = async (videos) => {
+    const blocked = await getBlockedUsers();
+    if (blocked.length === 0) return videos;
+    return videos.filter(video => {
+      const uploaderId = video.videoId.split('-')[0];
+      return !blocked.includes(uploaderId);
+    });
+  }
+
+  const providerHandleBlockUser = async (uploaderId) => {
+    // Remove blocked user's videos from feed instantly
+    const filtered = videoMetadatas.filter(video => {
+      const id = video.videoId.split('-')[0];
+      return id !== uploaderId;
+    });
+    setVideoMetadatas(filtered);
+    await setVideoMetadatasCache(video_feed_type, filtered);
+    
+    if (videoIndexExternalView >= filtered.length) {
+      await triggerVideoIndex(Math.max(0, filtered.length - 1), true, 'blockUser');
+    }
+  }
+
   const fetchNewVideos = async (isManual = false, setRefreshingVariable = true) => {
     console.log("fetchNewVideos:: isManual:", isManual, "videoMetadatas", videoMetadatas.length, "videoIndexExternalView", videoIndexExternalView);
     setError("");
@@ -236,8 +260,8 @@ const VideoProvider = ({children, video_feed_type}) => {
       setError(err.message);
     }
 
-    const unSeenVideoMetadatasBatch = await keepUnSeenVideoMetadatas(videoMetadataBatch);
-    // Note: No longer filtering out seen videos, so this warning is no longer relevant
+    let unSeenVideoMetadatasBatch = await keepUnSeenVideoMetadatas(videoMetadataBatch);
+    unSeenVideoMetadatasBatch = await filterBlockedContent(unSeenVideoMetadatasBatch);
 
     if (unSeenVideoMetadatasBatch.length === 0) {
       setRefreshing(false);
@@ -427,7 +451,8 @@ const VideoProvider = ({children, video_feed_type}) => {
         viewabilityConfig,
         onViewableItemsChanged,
         fetchNewVideos,
-        video_feed_type
+        video_feed_type,
+        providerHandleBlockUser,
       }}>
         {children}
       </VideoContext.Provider>
