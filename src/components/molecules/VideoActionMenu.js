@@ -14,6 +14,9 @@ import { blockUser, isUserBlocked } from '../atoms/moderation';
 const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete }) => {
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
 
+  // Guard against undefined videoId
+  if (!isVisible) return null;
+  
   const uploaderId = videoId ? videoId.split('-')[0] : '';
 
   const handleReport = () => {
@@ -54,7 +57,7 @@ const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete }) => {
 
   if (showBlockConfirm) {
     return (
-      <Modal isVisible={isVisible} onBackdropPress={() => setShowBlockConfirm(false)}>
+      <Modal isVisible={isVisible} onBackdropPress={() => setShowBlockConfirm(false)} useNativeDriver={true}>
         <View style={styles.confirmContainer}>
           <Text style={styles.confirmIcon}>🚫</Text>
           <Text style={styles.confirmTitle}>Block This User?</Text>
@@ -83,6 +86,8 @@ const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete }) => {
       onBackdropPress={onClose}
       style={styles.modal}
       backdropOpacity={0.5}
+      useNativeDriver={true}
+      hideModalContentWhileAnimating={true}
     >
       <View style={styles.container}>
         <View style={styles.handle} />

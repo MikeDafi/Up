@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
-DAYS_OLD = 7
+DAYS_OLD = 30
 
 def expire_table_items(table_name, partition_key, sort_key, timestamp_key, days_expired):
     table = dynamodb.Table(table_name)
