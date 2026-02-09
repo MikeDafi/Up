@@ -13,6 +13,7 @@ const VideoSlideController = () => {
         videoMetadatas,
         videoIndexExternalView,
         providerHandleBlockUser,
+        providerHandleReportVideo,
     } = useContext(VideoContext);
 
     const [showActionMenu, setShowActionMenu] = useState(false);
@@ -23,6 +24,12 @@ const VideoSlideController = () => {
     const handleBlockComplete = (uploaderId) => {
         if (providerHandleBlockUser) {
             providerHandleBlockUser(uploaderId);
+        }
+    };
+
+    const handleReportComplete = (videoId) => {
+        if (providerHandleReportVideo) {
+            providerHandleReportVideo(videoId);
         }
     };
 
@@ -52,6 +59,7 @@ const VideoSlideController = () => {
                 onClose={() => setShowActionMenu(false)}
                 videoId={currentVideoId}
                 onBlockComplete={handleBlockComplete}
+                onReportComplete={handleReportComplete}
             />
         </View>
     );

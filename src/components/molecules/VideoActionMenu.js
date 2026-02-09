@@ -6,17 +6,17 @@ import {
   TouchableOpacity,
   Linking,
   Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
-import Modal from 'react-native-modal';
 import PropTypes from 'prop-types';
 import { blockUser, isUserBlocked } from '../atoms/moderation';
 
-const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete }) => {
+const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete, onReportComplete }) => {
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
 
-  // Guard against undefined videoId
   if (!isVisible) return null;
-  
+
   const uploaderId = videoId ? videoId.split('-')[0] : '';
 
   const handleReport = () => {
@@ -26,6 +26,12 @@ const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete }) => {
     );
     Linking.openURL(`mailto:maskndafi@gmail.com?subject=${subject}&body=${body}`);
     onClose();
+
+    if (onReportComplete) {
+      onReportComplete(videoId);
+    }
+    
+    Alert.alert('Video Reported', 'Thank you for your report. This video has been removed from your feed.');
   };
 
   const handleBlockPress = async () => {
@@ -42,8 +48,8 @@ const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete }) => {
     await blockUser(uploaderId);
     setShowBlockConfirm(false);
     onClose();
-    
-    // Send block notification via email
+
+
     const subject = encodeURIComponent(`User Blocked - ${uploaderId}`);
     const body = encodeURIComponent(
       `A user has been blocked.\n\nBlocked User ID: ${uploaderId}\nVideo ID: ${videoId}\n\n---\nSent from Splytt app`
@@ -57,62 +63,65 @@ const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete }) => {
 
   if (showBlockConfirm) {
     return (
-      <Modal isVisible={isVisible} onBackdropPress={() => setShowBlockConfirm(false)} useNativeDriver={true}>
-        <View style={styles.confirmContainer}>
-          <Text style={styles.confirmIcon}>🚫</Text>
-          <Text style={styles.confirmTitle}>Block This User?</Text>
-          <Text style={styles.confirmText}>
-            Their videos will be removed from your feed immediately.
-          </Text>
-          <View style={styles.confirmButtons}>
-            <TouchableOpacity 
-              style={styles.cancelButton} 
-              onPress={() => setShowBlockConfirm(false)}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.blockButton} onPress={handleBlockConfirm}>
-              <Text style={styles.blockButtonText}>Block</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+      <Modal visible={isVisible} transparent animationType="fade" onRequestClose={() => setShowBlockConfirm(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setShowBlockConfirm(false)}>
+          <Pressable style={styles.confirmContainer} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.confirmIcon}>🚫</Text>
+            <Text style={styles.confirmTitle}>Block This User?</Text>
+            <Text style={styles.confirmText}>
+              Their videos will be removed from your feed immediately.
+            </Text>
+            <View style={styles.confirmButtons}>
+              <TouchableOpacity 
+                style={styles.cancelButton} 
+                onPress={() => setShowBlockConfirm(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.blockButton} onPress={handleBlockConfirm}>
+                <Text style={styles.blockButtonText}>Block</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     );
   }
 
   return (
     <Modal
-      isVisible={isVisible}
-      onBackdropPress={onClose}
-      style={styles.modal}
-      backdropOpacity={0.5}
-      useNativeDriver={true}
-      hideModalContentWhileAnimating={true}
+      visible={isVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
     >
-      <View style={styles.container}>
-        <View style={styles.handle} />
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={styles.container} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.handle} />
 
-        <TouchableOpacity style={styles.menuItem} onPress={handleReport}>
-          <Text style={styles.menuIcon}>🚩</Text>
-          <Text style={styles.menuLabel}>Report</Text>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={handleReport}>
+            <Text style={styles.menuIcon}>🚩</Text>
+            <Text style={styles.menuLabel}>Report</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity style={styles.menuItem} onPress={handleBlockPress}>
-          <Text style={styles.menuIcon}>🚫</Text>
-          <Text style={styles.menuLabel}>Block User</Text>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={handleBlockPress}>
+            <Text style={styles.menuIcon}>🚫</Text>
+            <Text style={styles.menuLabel}>Block User</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity style={styles.cancelMenuItem} onPress={onClose}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity style={styles.cancelMenuItem} onPress={onClose}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  modal: {
-    margin: 0,
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
   container: {
@@ -216,6 +225,7 @@ VideoActionMenu.propTypes = {
   onClose: PropTypes.func.isRequired,
   videoId: PropTypes.string,
   onBlockComplete: PropTypes.func,
+  onReportComplete: PropTypes.func,
 };
 
 export default VideoActionMenu;

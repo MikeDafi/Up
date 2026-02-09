@@ -41,7 +41,7 @@ export const LAST_LOGIN_UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1 day
 
 export const NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE = 5;
 
-export const NUM_VIDEOS_TO_REQUEST = 30; // Hard cap is set on up-generated-feed lambda side
+export const NUM_VIDEOS_TO_REQUEST = 40; // Hard cap is set on up-generated-feed lambda side
 
 export const PADDING_VIDEO_W_AUDIO_FEED = '10.5%'; // padding from bottom for video w audio feed
 export const PADDING_BOTTOM_CONTROLLER_WRAPPER = '17.5%'; // bottom controller padding from bottom

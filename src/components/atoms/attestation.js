@@ -1,4 +1,3 @@
-// attestation.js
 import * as Device from 'expo-device';
 
 export async function getAttestationInfo() {
@@ -13,23 +12,20 @@ export async function getAttestationInfo() {
   };
 
   try {
-    // Experimental: root/jailbreak detection (may not be reliable)
     info.isRooted = await Device.isRootedExperimentalAsync();
   } catch (err) {
-    console.warn('⚠️ Could not check if device is rooted:', err);
+    console.warn('Could not check if device is rooted:', err);
   }
 
   return info;
 }
 
-/**
- * Simple temporary trust check.
- * Returns true if:
- * - It's a real device (not simulator/emulator)
- * - It's not rooted/jailbroken (as far as we can tell)
- */
+// Returns true for real, non-rooted devices. Bypasses in __DEV__ for simulators.
 export async function isTrustedDevice() {
-  const attestation = await getAttestationInfo();
+  if (__DEV__) { // eslint-disable-line no-undef
+    return true;
+  }
 
+  const attestation = await getAttestationInfo();
   return attestation.isDevice && !attestation.isRooted;
 }
