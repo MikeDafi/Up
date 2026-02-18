@@ -23,30 +23,15 @@ from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright
 
-# Storage file for video IDs
 STORAGE_FILE = Path(__file__).parent / "video_ids.txt"
-
-# Browser state storage (for cookies/login persistence)
 BROWSER_STATE_DIR = Path(__file__).parent / "browser_state"
-
-# Download directory
 DOWNLOAD_DIR = Path(__file__).parent / "videos_downloads"
 
-# Constants for API URLs (for publishing)
-S3_API_URL = "https://o28an1f9e8.execute-api.us-east-2.amazonaws.com/prod"
-CREATE_VIDEO_METADATA_URL = "https://vie8q37y20.execute-api.us-east-2.amazonaws.com/prod/createVideoMetadata"
-
-# ============================================================================
-# Video Download and Upload Functions
-# ============================================================================
-
 def create_directory(path):
-    """Create directory if it doesn't exist."""
     if not os.path.exists(path):
         os.makedirs(path)
 
 def open_chrome_and_copy_text(url):
-    """Opens Chrome, navigates to URL, and fetches page content using AppleScript."""
     apple_script = f"""
         tell application "Google Chrome"
             activate
@@ -72,7 +57,6 @@ def open_chrome_and_copy_text(url):
         raise
 
 def open_url_in_chrome(url):
-    """Opens URL in Chrome to trigger download."""
     apple_script = f"""
         tell application "Google Chrome"
             activate
@@ -92,43 +76,34 @@ def open_url_in_chrome(url):
         raise
 
 def setup_chrome_download_folder():
-    """Setup Chrome to download to our videos_downloads folder."""
-    # Create the download directory if it doesn't exist
     DOWNLOAD_DIR.mkdir(exist_ok=True)
     return str(DOWNLOAD_DIR.absolute())
 
 def wait_for_download(video_id, timeout=20):
-    """Waits for a specific video file to appear in the download folder."""
     expected_path = DOWNLOAD_DIR / f"{video_id}.mp4"
-    
+
     click.echo(f"     Looking for: {expected_path}")
-    
+
     start_time = time.time()
     last_status_time = start_time
-    
+
     while time.time() - start_time < timeout:
-        # Check for the specific file
         if expected_path.exists():
             file_size = expected_path.stat().st_size
             if file_size > 1024:  # At least 1KB
                 return str(expected_path)
         
-        # Also check for any recent .mp4 files in the directory
         mp4_files = list(DOWNLOAD_DIR.glob("*.mp4"))
         if mp4_files:
-            # Find most recent file
             recent_file = max(mp4_files, key=lambda p: p.stat().st_mtime)
-            # If it's recent (within last 30 seconds), assume it's our file
             if time.time() - recent_file.stat().st_mtime < 30:
                 file_size = recent_file.stat().st_size
-                if file_size > 1024:  # At least 1KB
-                    # Rename to expected name if different
+                if file_size > 1024:
                     if recent_file != expected_path:
                         click.echo(f"     Renaming {recent_file.name} → {video_id}.mp4")
                         recent_file.rename(expected_path)
                     return str(expected_path)
         
-        # Print status every 5 seconds
         current_time = time.time()
         if current_time - last_status_time >= 5:
             elapsed = int(current_time - start_time)
@@ -138,7 +113,6 @@ def wait_for_download(video_id, timeout=20):
         
         time.sleep(1)
     
-    # Timeout - provide helpful error message
     files_in_dir = list(DOWNLOAD_DIR.glob("*.mp4"))
     click.echo(f"     ❌ Timeout after {timeout}s")
     click.echo(f"     📁 Files in {DOWNLOAD_DIR}: {[f.name for f in files_in_dir]}")
@@ -147,7 +121,6 @@ def wait_for_download(video_id, timeout=20):
     raise FileNotFoundError(f"Download failed: {expected_path} not found after {timeout} seconds.")
 
 def crop_video(file_path):
-    """Crop video to appropriate aspect ratio."""
     cmd = [
         "ffprobe",
         "-v", "error",
@@ -173,7 +146,6 @@ def crop_video(file_path):
     x_offset = (width - crop_width) // 2
     y_offset = (height - crop_height) // 2
     
-    # Create temporary output file
     temp_output = file_path.replace('.mp4', '_cropped.mp4')
     
     cmd = [
@@ -191,17 +163,14 @@ def crop_video(file_path):
     ]
     subprocess.run(cmd, check=True)
     
-    # Replace original with cropped version
     import os
     os.replace(temp_output, file_path)
     return file_path
 
 async def download_video_playwright(page, video_id):
-    """Download a video using Playwright via ssstik.io."""
     tiktok_url = f"https://www.tiktok.com/@x/video/{video_id}"
     expected_path = DOWNLOAD_DIR / f"{video_id}.mp4"
-    
-    # Check if file already exists
+
     if expected_path.exists() and expected_path.stat().st_size > 1024:
         click.echo(f"  ✅ File already exists: {expected_path}")
         return str(expected_path)
@@ -209,29 +178,23 @@ async def download_video_playwright(page, video_id):
     click.echo(f"  📥 Using ssstik.io to download...")
     
     try:
-        # Navigate to ssstik.io
         await page.goto('https://ssstik.io/en', wait_until='domcontentloaded', timeout=15000)
         await asyncio.sleep(2)
         
-        # Enter TikTok URL
         click.echo(f"  📝 Entering TikTok URL...")
         await page.fill('input[id="main_page_text"]', tiktok_url)
         await asyncio.sleep(1)
         
-        # Click download button
         click.echo(f"  🖱️  Clicking download button...")
         await page.click('button:has-text("Download")')
         
-        # Wait for the actual video download link to appear (not the /download-tiktok-stories link)
         click.echo(f"  ⏳ Waiting for video download link...")
-        await asyncio.sleep(10)  # Give ssstik.io time to process the video
-        
-        # Find the REAL download link (must contain tikcdn or be a direct .mp4 link)
+        await asyncio.sleep(10)
+
         download_link = None
         download_url = None
         for i in range(20):
             try:
-                # Look for links that contain tikcdn or point to .mp4 files
                 all_links = await page.locator('a').all()
                 for link in all_links:
                     href = await link.get_attribute('href')
@@ -252,11 +215,8 @@ async def download_video_playwright(page, video_id):
         
         if not download_url:
             raise Exception("Could not find video download link on ssstik.io after 20s")
-        
-        # The URL should already be absolute for tikcdn links
+
         click.echo(f"  🔗 Video URL: {download_url[:80]}...")
-        
-        # Now use requests to download the file directly with proper headers
         click.echo(f"  📥 Downloading file...")
         import requests
         headers = {
@@ -269,7 +229,6 @@ async def download_video_playwright(page, video_id):
         if response.status_code != 200:
             raise Exception(f"HTTP {response.status_code}: {response.reason}")
         
-        # Write to file and track bytes written
         bytes_written = 0
         with open(expected_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
@@ -279,7 +238,6 @@ async def download_video_playwright(page, video_id):
         
         click.echo(f"  📦 Wrote {bytes_written / (1024*1024):.1f}MB to disk")
         
-        # Verify file size
         if expected_path.stat().st_size < 1024:
             raise Exception(f"Downloaded file is too small: {expected_path.stat().st_size} bytes")
         
@@ -291,38 +249,41 @@ async def download_video_playwright(page, video_id):
         click.echo(f"  ❌ Error during download: {e}")
         raise
 
-def get_presigned_url(file_name, content_type):
-    """Get presigned URL from S3 API."""
-    print(f"Getting presigned URL for {file_name}")
-    response = requests.get(f"{S3_API_URL}/getPresignedUrl?fileName={file_name}&contentType={content_type}")
-    response.raise_for_status()
-    presigned_url = response.json()["url"]
-    print(f"Presigned URL: {presigned_url.split('?')[0]}")  # Show URL without query params
-    return presigned_url
+STAGING_BUCKET = 'up-staging-content'
 
-def upload_video(file_path, presigned_url):
-    """Upload video to S3."""
-    print(f"Uploading video to S3: {file_path}")
-    with open(file_path, "rb") as f:
-        response = requests.put(presigned_url, data=f, headers={"Content-Type": "video/mp4"})
-        if not response.ok:
-            raise Exception(f"Failed to upload video to S3: {response.text}")
+def upload_to_s3(file_path, content_type="video/mp4"):
+    """Upload directly to S3 via IAM credentials, return the object key."""
+    import re
+    import uuid as _uuid
+
+    raw_name = os.path.basename(file_path)
+    name, ext = os.path.splitext(raw_name)
+    ext = ext.lower()
+    if ext not in {'.mp4', '.mov', '.m4v', '.webm'}:
+        ext = '.mp4'
+    name = re.sub(r'[^a-zA-Z0-9_-]', '_', name)[:50]
+
+    object_key = f"{_uuid.uuid4()}-{name}{ext}"
+    print(f"Uploading to s3://{STAGING_BUCKET}/{object_key}")
+
+    s3_client = boto3.client('s3', region_name='us-east-2')
+    s3_client.upload_file(
+        Filename=file_path,
+        Bucket=STAGING_BUCKET,
+        Key=object_key,
+        ExtraArgs={'ContentType': content_type},
+    )
+
+    print(f"Uploaded: s3://{STAGING_BUCKET}/{object_key}")
+    return object_key
 
 def submit_media(file_path, description, hashtags, mute_by_default):
-    """Upload video and metadata via Lambda."""
+    """Crop, upload to S3, invoke metadata Lambda."""
     cropped_file_path = crop_video(file_path)
-    
-    file_name = os.path.basename(cropped_file_path)
-    presigned_url = get_presigned_url(file_name, "video/mp4")
-    
-    upload_video(cropped_file_path, presigned_url)
-    
-    # Get the video ID and S3 base URL from the presigned URL
-    url_without_params = presigned_url.split("?")[0]
-    video_id = url_without_params.split("/")[-1]
-    s3_base_url = "/".join(url_without_params.split("/")[:-1])
-    
-    # Invoke Lambda function to create metadata
+
+    video_id = upload_to_s3(cropped_file_path)
+    s3_base_url = f"https://{STAGING_BUCKET}.s3.us-east-2.amazonaws.com"
+
     metadata = {
         "videoId": video_id,
         "description": description,
@@ -330,10 +291,8 @@ def submit_media(file_path, description, hashtags, mute_by_default):
         "muteByDefault": mute_by_default,
     }
     print(f"Invoking Lambda with metadata: {metadata}")
-    
-    # Invoke Lambda function
+
     lambda_client = boto3.client('lambda', region_name='us-east-2')
-    
     lambda_payload = {
         "body": json.dumps(metadata)
     }
@@ -353,11 +312,6 @@ def submit_media(file_path, description, hashtags, mute_by_default):
     print(f"Finished uploading video: {file_path}")
     return video_id, s3_base_url
 
-# ============================================================================
-# Storage Functions
-# ============================================================================
-
-# Search keywords
 SEARCH_KEYWORDS = [
     'trending',
     'comedy',
@@ -372,7 +326,6 @@ SEARCH_KEYWORDS = [
 ]
 
 def load_video_ids():
-    """Load existing video IDs from storage."""
     if not STORAGE_FILE.exists():
         return {}
     
@@ -392,7 +345,6 @@ def load_video_ids():
     return video_data
 
 def save_video_id(video_id, category, description='', hashtags=None, date=None):
-    """Save a video ID to storage (avoiding duplicates)."""
     if date is None:
         date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -402,7 +354,7 @@ def save_video_id(video_id, category, description='', hashtags=None, date=None):
     existing = load_video_ids()
     
     if video_id in existing:
-        return False  # Duplicate
+        return False
     
     data = {
         'id': video_id,
@@ -420,7 +372,6 @@ def save_video_id(video_id, category, description='', hashtags=None, date=None):
     return True
 
 def mark_as_downloaded(video_id):
-    """Mark a video ID as downloaded."""
     existing = load_video_ids()
     
     if video_id not in existing:
@@ -428,15 +379,13 @@ def mark_as_downloaded(video_id):
     
     existing[video_id]['downloaded'] = True
     
-    # Rewrite entire file
     with open(STORAGE_FILE, 'w') as f:
         for vid_id, data in sorted(existing.items(), key=lambda x: (x[1]['date'], x[1]['category'])):
             f.write(json.dumps(data) + '\n')
-    
+
     return True
 
 def mark_as_published(video_id, cleanup=False):
-    """Mark a video ID as published. Optionally cleanup local file."""
     existing = load_video_ids()
     
     if video_id not in existing:
@@ -444,7 +393,6 @@ def mark_as_published(video_id, cleanup=False):
     
     existing[video_id]['published'] = True
     
-    # Cleanup: set downloaded to False and delete local file
     if cleanup:
         existing[video_id]['downloaded'] = False
         local_file = DOWNLOAD_DIR / f"{video_id}.mp4"
@@ -454,15 +402,13 @@ def mark_as_published(video_id, cleanup=False):
             except Exception as e:
                 click.echo(f"  ⚠️  Could not delete {local_file}: {e}")
     
-    # Rewrite entire file
     with open(STORAGE_FILE, 'w') as f:
         for vid_id, data in sorted(existing.items(), key=lambda x: (x[1]['date'], x[1]['category'])):
             f.write(json.dumps(data) + '\n')
-    
+
     return True
 
 async def get_video_details(page, video_id, debug=False):
-    """Visit individual video page to extract details (hashtags and description)."""
     try:
         video_url = f"https://www.tiktok.com/@x/video/{video_id}"
         if debug:
@@ -472,12 +418,10 @@ async def get_video_details(page, video_id, debug=False):
         await asyncio.sleep(3)  # Wait longer for content to load
         
         if debug:
-            # Take screenshot for debugging
             screenshot_path = f"/tmp/tiktok_{video_id}.png"
             await page.screenshot(path=screenshot_path)
             click.echo(f"📸 Screenshot saved: {screenshot_path}")
         
-        # Extract video details (hashtags and description) from video page
         result = await page.evaluate("""
             (debug) => {
                 const tags = [];
@@ -623,28 +567,17 @@ async def get_video_details(page, video_id, debug=False):
         return {'hashtags': [], 'description': ''}
 
 async def scrape_video_ids(page, count=10, extract_details=False, existing_ids=None):
-    """Scrape video IDs from current TikTok page.
-    
-    Args:
-        existing_ids: Set of video IDs to skip (already in storage)
-    """
     if existing_ids is None:
         existing_ids = set()
     try:
-        # Wait for page to fully load
         click.echo(f"  ⏳ Waiting for content...")
         await asyncio.sleep(4)
         
-        # Scroll to load more videos
         click.echo(f"  📜 Scrolling...")
         for i in range(3):
             await page.evaluate('window.scrollBy(0, window.innerHeight)')
             await asyncio.sleep(1)
         
-        # Take screenshot for debugging
-        # await page.screenshot(path='/tmp/tiktok_search.png')
-        
-        # Try to extract video IDs from page
         video_data = await page.evaluate("""
             () => {
                 const videos = [];
@@ -735,7 +668,6 @@ async def scrape_video_ids(page, count=10, extract_details=False, existing_ids=N
         else:
             click.echo(f"  ⚠️  No video IDs found")
         
-        # Filter out videos that already exist in storage
         if existing_ids and video_data:
             original_count = len(video_data)
             video_data = [v for v in video_data if v['id'] not in existing_ids]
@@ -743,19 +675,15 @@ async def scrape_video_ids(page, count=10, extract_details=False, existing_ids=N
             if skipped > 0:
                 click.echo(f"  ⏭️  Skipped {skipped} videos (already in storage)")
         
-        # Limit to requested count
         video_data = video_data[:count]
-        
-        # Optionally visit each video to get hashtags and description
+
         if extract_details and video_data:
             click.echo(f"  🏷️  Extracting details from {len(video_data)} videos...")
             for i, video in enumerate(video_data, 1):
                 click.echo(f"     [{i}/{len(video_data)}] Visiting video {video['id']}...")
-                # Enable debug mode for first video only
                 debug = (i == 1)
                 details = await get_video_details(page, video['id'], debug=debug)
                 video['hashtags'] = details.get('hashtags', [])
-                # Update description if we got a better one from the video page
                 page_desc = details.get('description', '')
                 if page_desc and len(page_desc) > len(video.get('desc', '')):
                     video['desc'] = page_desc
@@ -785,7 +713,6 @@ def login(timeout):
     asyncio.run(login_to_tiktok(timeout))
 
 async def login_to_tiktok(timeout):
-    """Open browser and wait for user to log in to TikTok."""
     click.echo(click.style('='*80, fg='cyan'))
     click.echo(click.style('TikTok Login', fg='cyan', bold=True))
     click.echo(click.style('='*80, fg='cyan'))
@@ -793,10 +720,8 @@ async def login_to_tiktok(timeout):
     click.echo(f"   You have {timeout} seconds to log in.\n")
     
     async with async_playwright() as p:
-        # Create browser state directory if it doesn't exist
         BROWSER_STATE_DIR.mkdir(exist_ok=True)
-        
-        # Use persistent context to save login/cookies
+
         context = await p.chromium.launch_persistent_context(
             str(BROWSER_STATE_DIR),
             headless=False,
@@ -805,14 +730,9 @@ async def login_to_tiktok(timeout):
             args=['--disable-blink-features=AutomationControlled', '--no-sandbox'],
         )
         
-        # Get or create page
         pages = context.pages
-        if pages:
-            page = pages[0]
-        else:
-            page = await context.new_page()
-        
-        # Navigate to TikTok login
+        page = pages[0] if pages else await context.new_page()
+
         await page.goto('https://www.tiktok.com/login', wait_until='networkidle')
         
         click.echo("🌐 Browser opened to TikTok login page.")
@@ -820,23 +740,19 @@ async def login_to_tiktok(timeout):
         click.echo("   2. Wait for the feed to load")
         click.echo(f"   3. Type 'y' and press Enter when done (or wait {timeout}s)\n")
         
-        # Wait for user input with timeout
         click.echo(click.style("Type 'y' when logged in: ", fg='yellow'), nl=False)
         sys.stdout.flush()
-        
-        # Poll for input with timeout
+
         start_time = time.time()
         user_confirmed = False
         
         while time.time() - start_time < timeout:
-            # Check if there's input available (works on Unix)
             if sys.stdin in select.select([sys.stdin], [], [], 1)[0]:
                 line = sys.stdin.readline().strip().lower()
                 if line == 'y' or line == 'yes':
                     user_confirmed = True
                     break
             
-            # Print countdown every 30 seconds
             elapsed = int(time.time() - start_time)
             remaining = timeout - elapsed
             if elapsed > 0 and elapsed % 30 == 0:
@@ -849,7 +765,6 @@ async def login_to_tiktok(timeout):
         else:
             click.echo(f"\n⏰ Timeout reached ({timeout}s). Saving session anyway...")
         
-        # Verify login by checking for profile elements
         try:
             await page.goto('https://www.tiktok.com', wait_until='networkidle')
             await asyncio.sleep(2)
@@ -874,7 +789,6 @@ def get(categories, count, headless, extract_details):
     asyncio.run(get_videos(categories, count, headless, extract_details))
 
 async def get_videos(categories_str, count, headless, extract_details):
-    """Async function to scrape videos."""
     categories_list = [c.strip() for c in categories_str.split(',')]
     
     click.echo(click.style('='*80, fg='cyan'))
@@ -886,7 +800,6 @@ async def get_videos(categories_str, count, headless, extract_details):
     click.echo(f"Extract details: {extract_details}")
     click.echo(f"Storage: {STORAGE_FILE}\n")
     
-    # Load existing video IDs to avoid duplicates
     existing_videos = load_video_ids()
     existing_ids = set(existing_videos.keys())
     click.echo(f"📦 Loaded {len(existing_ids)} existing video IDs from storage\n")
@@ -896,11 +809,9 @@ async def get_videos(categories_str, count, headless, extract_details):
     
     async with async_playwright() as p:
         click.echo("🚀 Launching browser...")
-        
-        # Create browser state directory if it doesn't exist
+
         BROWSER_STATE_DIR.mkdir(exist_ok=True)
-        
-        # Use persistent context to save login/cookies between runs
+
         context = await p.chromium.launch_persistent_context(
             str(BROWSER_STATE_DIR),
             headless=headless,
@@ -909,22 +820,15 @@ async def get_videos(categories_str, count, headless, extract_details):
             args=['--disable-blink-features=AutomationControlled', '--no-sandbox'],
         )
         
-        # Check if we have existing pages or need to create new one
         pages = context.pages
-        if pages:
-            page = pages[0]
-        else:
-            page = await context.new_page()
-        
-        # Listen to console logs from the browser
+        page = pages[0] if pages else await context.new_page()
+
         page.on('console', lambda msg: click.echo(f"  [BROWSER] {msg.text}"))
-        
-        # Open TikTok first (needed to set cookies)
+
         click.echo("📍 Opening TikTok.com...")
         await page.goto('https://www.tiktok.com', wait_until='networkidle')
         await asyncio.sleep(2)
         
-        # Try to close any modals
         try:
             close_button = page.locator('button[aria-label="Close"]').first
             if await close_button.is_visible(timeout=2000):
@@ -932,11 +836,9 @@ async def get_videos(categories_str, count, headless, extract_details):
         except:
             pass
         
-        # Process each category
         for i, category_name in enumerate(categories_list, 1):
             click.echo(click.style(f"\n[{i}/{len(categories_list)}] Category: {category_name.upper()}", fg='yellow', bold=True))
             
-            # Navigate and search using URL directly
             click.echo(f"  🔍 Searching for '{category_name}'...")
             try:
                 search_url = f'https://www.tiktok.com/search?q={category_name}'
@@ -948,7 +850,6 @@ async def get_videos(categories_str, count, headless, extract_details):
                 click.echo(f"  ❌ Search failed: {e}")
                 continue
             
-            # Scrape videos
             click.echo(f"  🔍 Scraping video IDs...")
             videos = await scrape_video_ids(page, count, extract_details, existing_ids)
             
@@ -958,7 +859,6 @@ async def get_videos(categories_str, count, headless, extract_details):
             
             click.echo(f"  ✅ Found {len(videos)} videos")
             
-            # Save video IDs
             new_count = 0
             dup_count = 0
             
@@ -966,7 +866,6 @@ async def get_videos(categories_str, count, headless, extract_details):
                 hashtags = video.get('hashtags', [])
                 if save_video_id(video['id'], category_name, video.get('desc', ''), hashtags):
                     new_count += 1
-                    # Add to existing_ids so we don't re-scrape in later categories
                     existing_ids.add(video['id'])
                     hashtag_str = f" #{' #'.join(hashtags)}" if hashtags else ""
                     click.echo(f"    ✅ {video['id']}{hashtag_str} - {video.get('desc', '')[:50]}...")
@@ -979,14 +878,12 @@ async def get_videos(categories_str, count, headless, extract_details):
             
             click.echo(f"  📊 New: {new_count}, Duplicates: {dup_count}")
             
-            # Wait between categories
             if i < len(categories_list):
                 click.echo("  ⏳ Waiting 5 seconds...")
                 await asyncio.sleep(5)
         
         await context.close()
     
-    # Summary
     click.echo(click.style('\n' + '='*80, fg='cyan'))
     click.echo(click.style('SUMMARY', fg='cyan', bold=True))
     click.echo(click.style('='*80, fg='cyan'))
@@ -1006,22 +903,18 @@ def download(category, limit, id, undownloaded_only, headless):
     asyncio.run(download_videos(category, limit, id, undownloaded_only, headless))
 
 async def download_videos(category, limit, id, undownloaded_only, headless):
-    """Async function to download videos using Playwright."""
     click.echo(click.style('='*80, fg='blue'))
     click.echo(click.style('Video Downloader', fg='blue', bold=True))
     click.echo(click.style('='*80, fg='blue'))
     
-    # Setup download directory
     DOWNLOAD_DIR.mkdir(exist_ok=True)
-    
-    # Load video IDs
+
     all_videos = load_video_ids()
     
     if not all_videos:
         click.echo("❌ No video IDs found. Run 'videos get' first.")
         return
     
-    # If specific ID is provided, only download that one
     if id:
         if id not in all_videos:
             click.echo(f"❌ Video ID {id} not found in storage.")
@@ -1029,7 +922,6 @@ async def download_videos(category, limit, id, undownloaded_only, headless):
         videos_to_download = [(id, all_videos[id])]
         click.echo(f"\n📍 Downloading specific video: {id}\n")
     else:
-        # Filter videos
         videos_to_download = []
         for vid_id, data in all_videos.items():
             if category and data['category'] != category:
@@ -1042,7 +934,6 @@ async def download_videos(category, limit, id, undownloaded_only, headless):
         click.echo("ℹ️  No videos to download with current filters.")
         return
     
-    # Apply limit (only if not downloading specific ID)
     if limit and not id:
         videos_to_download = videos_to_download[:limit]
     
@@ -1054,11 +945,9 @@ async def download_videos(category, limit, id, undownloaded_only, headless):
     success_count = 0
     failed_count = 0
     
-    # Launch Playwright browser with download settings
     async with async_playwright() as p:
         click.echo("🚀 Launching browser...")
         
-        # Use persistent context (let downloads go to default ~/Downloads)
         context = await p.chromium.launch_persistent_context(
             str(BROWSER_STATE_DIR),
             headless=headless,
@@ -1068,23 +957,15 @@ async def download_videos(category, limit, id, undownloaded_only, headless):
             accept_downloads=True,
         )
         
-        # Get or create page
         pages = context.pages
-        if pages:
-            page = pages[0]
-        else:
-            page = await context.new_page()
-        
-        # Process each video
+        page = pages[0] if pages else await context.new_page()
+
         for i, (vid_id, data) in enumerate(videos_to_download, 1):
             click.echo(click.style(f"\n[{i}/{len(videos_to_download)}] {data['category'].upper()} - {vid_id}", fg='yellow'))
             click.echo(f"  Description: {data.get('description', '')[:80]}...")
             
             try:
-                # Download video using Playwright
                 file_path = await download_video_playwright(page, vid_id)
-                
-                # Mark as downloaded
                 mark_as_downloaded(vid_id)
                 
                 success_count += 1
@@ -1097,7 +978,6 @@ async def download_videos(category, limit, id, undownloaded_only, headless):
         
         await context.close()
     
-    # Summary
     click.echo(click.style('\n' + '='*80, fg='blue'))
     click.echo(click.style('SUMMARY', fg='blue', bold=True))
     click.echo(click.style('='*80, fg='blue'))
@@ -1118,14 +998,12 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
     click.echo(click.style('Video Publisher', fg='green', bold=True))
     click.echo(click.style('='*80, fg='green'))
     
-    # Load video IDs
     all_videos = load_video_ids()
-    
+
     if not all_videos:
         click.echo("❌ No video IDs found. Run 'videos get' first.")
         return
-    
-    # If specific ID is provided, only publish that one
+
     if id:
         if id not in all_videos:
             click.echo(f"❌ Video ID {id} not found in storage.")
@@ -1133,7 +1011,6 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
         videos_to_publish = [(id, all_videos[id])]
         click.echo(f"\n📍 Publishing specific video: {id}\n")
     else:
-        # Filter videos - must be downloaded but not published
         videos_to_publish = []
         for vid_id, data in all_videos.items():
             if category and data['category'] != category:
@@ -1150,10 +1027,9 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
         click.echo("💡 Tip: Run 'videos download' first to download videos.")
         return
     
-    # Apply limit (only if not publishing specific ID)
     if limit and not id:
         videos_to_publish = videos_to_publish[:limit]
-    
+
     if not id:
         click.echo(f"\n📊 Videos to publish: {len(videos_to_publish)}")
         click.echo(f"Filters: category={category or 'all'}, unpublished_only={unpublished_only}\n")
@@ -1167,7 +1043,6 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
         click.echo(f"  Description: {data.get('description', '')[:80]}...")
         
         try:
-            # Check if file exists locally
             file_path = DOWNLOAD_DIR / f"{vid_id}.mp4"
             if not file_path.exists():
                 click.echo(f"  ❌ File not found: {file_path}")
@@ -1175,23 +1050,24 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
                 failed_count += 1
                 continue
             
-            # Submit to S3 and DynamoDB via Lambda
-            click.echo(f"  ☁️  Uploading to S3...")
             description = data.get('description', '')
-            # Use hashtags from TikTok, fallback to category
+            if not description:
+                click.echo(click.style(f"  ⏭️  Skipping (empty description)", fg='yellow'))
+                continue
+            
+            click.echo(f"  ☁️  Uploading to S3...")
             hashtags = data.get('hashtags', [])
             if not hashtags:
                 category = data.get('category', '').lower()
                 hashtags = [category] if category else []
+            hashtags = hashtags[:20]
             click.echo(f"  🏷️  Hashtags: {hashtags}")
             video_id, s3_base_url = submit_media(str(file_path), description, hashtags, mute_by_default)
             
-            # Mark as published and cleanup local file if requested
             mark_as_published(vid_id, cleanup=cleanup)
             if cleanup:
                 click.echo(f"  🗑️  Cleaned up local file")
             
-            # Track S3 URL for polling (use the actual S3 base URL)
             s3_url = f"{s3_base_url}/{video_id}"
             s3_urls.append((vid_id, s3_url))
             
@@ -1203,7 +1079,6 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
             click.echo(click.style(f"  ❌ Failed: {e}", fg='red'))
             traceback.print_exc()
     
-    # Verify S3 uploads using AWS CLI
     if s3_urls:
         click.echo(click.style('\n' + '='*80, fg='cyan'))
         click.echo(click.style('Verifying S3 Uploads', fg='cyan', bold=True))
@@ -1213,14 +1088,12 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
         
         for vid_id, s3_url in s3_urls:
             try:
-                # Parse bucket and key from URL
                 parts = s3_url.replace('https://', '').split('/')
-                bucket = parts[0].split('.')[0]  # Extract bucket name from subdomain
+                bucket = parts[0].split('.')[0]
                 key = '/'.join(parts[1:])
                 
                 click.echo(f"  🔍 Checking s3://{bucket}/{key}")
                 
-                # Use head_object to check if file exists
                 s3_client.head_object(Bucket=bucket, Key=key)
                 click.echo(f"  ✅ {vid_id}: Available on S3")
             except s3_client.exceptions.NoSuchKey:
@@ -1228,7 +1101,6 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
             except Exception as e:
                 click.echo(f"  ❌ {vid_id}: Failed to verify ({e})")
     
-    # Summary
     click.echo(click.style('\n' + '='*80, fg='green'))
     click.echo(click.style('SUMMARY', fg='green', bold=True))
     click.echo(click.style('='*80, fg='green'))
@@ -1243,7 +1115,6 @@ def dedupe():
     """Remove duplicate video IDs from storage."""
     click.echo("🔍 Checking for duplicates...")
     
-    # Count lines in original file
     original_line_count = 0
     if STORAGE_FILE.exists():
         with open(STORAGE_FILE, 'r') as f:
@@ -1252,7 +1123,6 @@ def dedupe():
     all_videos = load_video_ids()
     unique_count = len(all_videos)
     
-    # Rewrite file (load_video_ids already deduplicates via dict)
     with open(STORAGE_FILE, 'w') as f:
         for vid_id, data in sorted(all_videos.items(), key=lambda x: (x[1]['date'], x[1]['category'])):
             f.write(json.dumps(data) + '\n')
@@ -1278,7 +1148,6 @@ def list(category, downloaded, published):
         click.echo("No video IDs found.")
         return
     
-    # Group by category
     by_category = {}
     for vid_id, data in all_videos.items():
         cat = data['category']
@@ -1293,7 +1162,6 @@ def list(category, downloaded, published):
             by_category[cat] = []
         by_category[cat].append((vid_id, data))
     
-    # Display
     click.echo(click.style('='*80, fg='blue'))
     click.echo(click.style('Stored Video IDs', fg='blue', bold=True))
     click.echo(click.style('='*80, fg='blue'))

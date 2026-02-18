@@ -22,7 +22,6 @@ export default function App() {
       setTrusted(trusted);
 
       if (trusted) {
-        // Check EULA acceptance
         const accepted = await hasAcceptedEULA();
         setEulaAccepted(accepted);
 
@@ -40,21 +39,22 @@ export default function App() {
     checkDeviceTrust();
   }, []);
 
-  const handleEULAAccept = async () => {
-    await acceptEULA();
-    setEulaAccepted(true);
-    
-    // Run initialization after EULA acceptance
-    try {
-      await applyDecayToAllConfidenceScores();
-      await aggregateUpdateUserData();
-    } catch (error) {
-      console.error('Error during initialization:', error);
+  const handleAcceptEULA = async () => {
+    const success = await acceptEULA();
+    if (success) {
+      setEulaAccepted(true);
+      // Run deferred initialization after EULA acceptance
+      try {
+        await applyDecayToAllConfidenceScores();
+        await aggregateUpdateUserData();
+      } catch (error) {
+        console.error('Error during initialization:', error);
+      }
     }
   };
 
   if (trusted === null || (trusted && eulaAccepted === null)) {
-    return null; // or splash screen / loading indicator
+    return null; // loading
   }
 
   if (!trusted) {
@@ -66,7 +66,7 @@ export default function App() {
   }
 
   if (!eulaAccepted) {
-    return <EULAScreen onAccept={handleEULAAccept} />;
+    return <EULAScreen onAccept={handleAcceptEULA} />;
   }
 
   return (
@@ -75,6 +75,9 @@ export default function App() {
             screenOptions={{
               tabBarStyle: styles.tabBarStyle,
               tabBarIconStyle: styles.tabBarIconStyle,
+              tabBarActiveTintColor: '#ffffff',
+              tabBarInactiveTintColor: '#888888',
+              tabBarLabelStyle: { color: '#ffffff' },
             }}
         >
           <Tab.Screen
@@ -84,7 +87,7 @@ export default function App() {
                 headerShown: false,
                 tabBarIcon: ({ color }) => (
                     <Image
-                        source={require('@assets/icons/tab_bar/two_way.png')}
+                        source={require('@assets/icons/tab_bar/dual_play.png')}
                         style={[styles.icon, { tintColor: color }]}
                     />
                 ),
@@ -111,9 +114,9 @@ export default function App() {
 const styles = StyleSheet.create({
   tabBarStyle: {
     height: 68,
-    backgroundColor: 'white',
+    backgroundColor: '#000000',
     borderTopWidth: 0.5,
-    borderTopColor: '#ccc',
+    borderTopColor: '#333',
   },
   tabBarIconStyle: {
     marginTop: 5,

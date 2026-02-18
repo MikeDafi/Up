@@ -4,7 +4,7 @@ import { StyleSheet, TouchableOpacity, Text, View } from 'react-native';
 const TemporaryWarningBanner = ({ temporaryWarning, setTemporaryWarning, timeout = 5000 }) => {
   useEffect(() => {
     if (temporaryWarning) {
-      const timer = setTimeout(() => setTemporaryWarning(""), timeout); // Auto-hide after 3 seconds
+      const timer = setTimeout(() => setTemporaryWarning(""), timeout); // Auto-hide after timeout
       return () => clearTimeout(timer); // Cleanup on unmount
     }
   }, [temporaryWarning]);

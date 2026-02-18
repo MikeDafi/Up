@@ -54,7 +54,7 @@ export const PADDING_BOTTOM_CONTROLLER_WRAPPER = '17.5%'; // bottom controller p
 export const HEIGHT_VIDEO_W_AUDIO_FEED = '60.5%'; // this value - PADDING_VIDEO_W_AUDIO_FEED = 50%
 export const HEIGHT_VIDEO_W_AUDIO_VIDEO_IN_VIDEO_SLIDE = '90%';
 
-export const VIDEO_REFRESH_PERIOD_SECONDS = 300000; // 5 minutes
+export const VIDEO_REFRESH_PERIOD_MS = 300000; // 5 minutes
 
 export const RIGHT_PADDING_FOR_CONTROLLERS = 25;
 
@@ -66,4 +66,4 @@ export const ON_LIKE_CONFIDENCE_SCORE_WEIGHT = 1;
 export const ON_UNLIKE_CONFIDENCE_SCORE_WEIGHT = -1;
 export const COMMENT_CONFIDENCE_SCORE_WEIGHT = 0.8;
 
-export const MAX_DESCRIPTION_CHARACTERS = 50;
+export const MAX_DESCRIPTION_CHARACTERS = 500;

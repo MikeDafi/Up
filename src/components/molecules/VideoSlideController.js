@@ -67,7 +67,7 @@ const VideoSlideController = () => {
 
 const styles = StyleSheet.create({
     container: {
-        width: '50',
+        width: 50,
         position: 'absolute',
         bottom: 0,
         right: 0,

@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Linking,
   Alert,
   Modal,
   Pressable,
@@ -20,17 +19,12 @@ const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete, onRepor
   const uploaderId = videoId ? videoId.split('-')[0] : '';
 
   const handleReport = () => {
-    const subject = encodeURIComponent(`Content Report - Video ${videoId}`);
-    const body = encodeURIComponent(
-      `I am reporting the following video:\n\nVideo ID: ${videoId}\n\nReason:\n[Please describe the issue]\n\n---\nSent from Splytt app`
-    );
-    Linking.openURL(`mailto:maskndafi@gmail.com?subject=${subject}&body=${body}`);
     onClose();
 
     if (onReportComplete) {
       onReportComplete(videoId);
     }
-    
+
     Alert.alert('Video Reported', 'Thank you for your report. This video has been removed from your feed.');
   };
 
@@ -49,13 +43,6 @@ const VideoActionMenu = ({ isVisible, onClose, videoId, onBlockComplete, onRepor
     setShowBlockConfirm(false);
     onClose();
 
-
-    const subject = encodeURIComponent(`User Blocked - ${uploaderId}`);
-    const body = encodeURIComponent(
-      `A user has been blocked.\n\nBlocked User ID: ${uploaderId}\nVideo ID: ${videoId}\n\n---\nSent from Splytt app`
-    );
-    Linking.openURL(`mailto:maskndafi@gmail.com?subject=${subject}&body=${body}`);
-    
     if (onBlockComplete) {
       onBlockComplete(uploaderId);
     }

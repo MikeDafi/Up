@@ -1,7 +1,6 @@
 export class VideoMetadata {
   constructor({
     videoId = '',
-    title = '',
     description = '',
     hashtags = [],
     muteByDefault = false,
@@ -11,7 +10,6 @@ export class VideoMetadata {
     country = '',
   }) {
     this.videoId = videoId;                  // Unique identifier
-    this.title = title;                      // Title of video
     this.description = description;          // Short description
     this.hashtags = hashtags;                // Array of hashtags
     this.muteByDefault = muteByDefault;      // Whether video is muted by default

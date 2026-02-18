@@ -8,7 +8,7 @@ const CHARACTER_WIDTH = 11; // Approximate width per character for text
 const EXPANDED_HEIGHT = 100; // Height of the expanded view
 
 const VideoDescriptionSlide = () => {
-  const { videoMetadatas = [], videoIndexExternalView = 0 } = useContext(VideoContext);
+  const { videoMetadatas = [], videoIndexExternalView = 0, isPaused } = useContext(VideoContext);
   const slidingAnimation = useRef(new Animated.Value(0)).current;
   const [isExpanded, setIsExpanded] = useState(false); // State to toggle between expanded and sliding view
 
@@ -18,36 +18,40 @@ const VideoDescriptionSlide = () => {
     const videoMetadata = videoMetadatas[videoIndexExternalView];
     if (!videoMetadata) return ''; // Prevent accessing undefined
 
-    // Combine description with hashtags for display
-    const descText = videoMetadata.description || '';
-    const hashtags = videoMetadata.hashtags || [];
-    const hashtagText = hashtags.map(tag => tag.startsWith('#') ? tag : `#${tag}`).join(' ');
-    
-    // Return combined text, trimmed
-    return [descText, hashtagText].filter(Boolean).join(' ').trim();
+    // Only show the actual description — hide the bar entirely if there's none
+    return (videoMetadata.description || '').trim();
   }, [videoMetadatas, videoIndexExternalView]);
 
+  // Reset expanded state when switching videos
   useEffect(() => {
-    if (!isExpanded && description.length > 0) {
-      const textWidth = BASE_WIDTH + CHARACTER_WIDTH * description.length;
-      const distance = textWidth + windowWidth;
-      const duration = (distance / 90) * 1000; // Speed control
+    setIsExpanded(false);
+  }, [videoIndexExternalView]);
+
+  useEffect(() => {
+    // Don't animate when expanded, empty, or feed is not active (tab switched / paused)
+    if (isExpanded || description.length === 0 || isPaused) {
       slidingAnimation.setValue(windowWidth);
-
-      const animation = Animated.loop(
-          Animated.timing(slidingAnimation, {
-            toValue: -textWidth,
-            duration: duration,
-            easing: Easing.linear,
-            useNativeDriver: true,
-          })
-      );
-
-      animation.start();
-
-      return () => animation.stop();
+      return;
     }
-  }, [description, isExpanded]);
+
+    const textWidth = BASE_WIDTH + CHARACTER_WIDTH * description.length;
+    const distance = textWidth + windowWidth;
+    const duration = (distance / 90) * 1000; // Speed control
+    slidingAnimation.setValue(windowWidth);
+
+    const animation = Animated.loop(
+        Animated.timing(slidingAnimation, {
+          toValue: -textWidth,
+          duration: duration,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+    );
+
+    animation.start();
+
+    return () => animation.stop();
+  }, [description, isExpanded, isPaused]);
 
   if (description === '') {
     return null;
