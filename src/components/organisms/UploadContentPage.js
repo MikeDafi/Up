@@ -1,4 +1,4 @@
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useState, useEffect} from 'react';
 import {
   Keyboard,
   StyleSheet,
@@ -13,11 +13,11 @@ import {
   ActivityIndicator
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import {Video} from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import Modal from 'react-native-modal';
 import {VideoMetadata} from '../atoms/VideoMetadata';
 import {createVideoMetadata} from '../atoms/dynamodb';
-import {getPresignedUrl, uploadVideo} from '../atoms/s3';
+import {getPresignedPost, uploadVideo} from '../atoms/s3';
 import {fetchGeoLocation} from '../atoms/location';
 import {MAX_DESCRIPTION_CHARACTERS} from "../atoms/constants";
 import {backoff} from "../atoms/utilities";
@@ -28,8 +28,9 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const ErrorType = {
   NO_VIDEO: 'Please select a video before submitting.',
   NO_DESCRIPTION: 'Description is required.',
+  DESCRIPTION_TOO_LONG: `Description cannot exceed ${MAX_DESCRIPTION_CHARACTERS} characters.`,
   NOT_ENOUGH_HASHTAGS: 'At least 3 hashtags are required.',
-  TOO_MANY_HASHTAGS: 'Maximum 10 hashtags allowed.',
+  TOO_MANY_HASHTAGS: 'Maximum 20 hashtags allowed.',
   HASHTAG_TOO_LONG: 'Hashtags should be less than 15 characters.',
   HASHTAG_DUPLICATE: 'Duplicate hashtags are not allowed.',
   HASHTAG_EMPTY: 'Hashtag cannot be empty.',
@@ -47,7 +48,28 @@ const UploadContentPage = () => {
   const [isLoadingVideo, setIsLoadingVideo] = useState(false);
   const [error, setError] = useState('');
   const [isFaqVisible, setIsFaqVisible] = useState(false);
-  const [shouldPlay, setShouldPlay] = useState(false); // Allow video to play
+  const [shouldPlay, setShouldPlay] = useState(false);
+
+  // Create a video player for the preview — source updates when media changes
+  const player = useVideoPlayer(media, (p) => {
+    p.loop = true;
+    p.muted = muteByDefault;
+  });
+
+  // Sync mute state with player
+  useEffect(() => {
+    if (player) player.muted = muteByDefault;
+  }, [player, muteByDefault]);
+
+  // Sync play/pause state with player
+  useEffect(() => {
+    if (!player) return;
+    if (shouldPlay) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [player, shouldPlay]);
 
   const validateFields = () => {
     if (!media) {
@@ -119,23 +141,22 @@ const UploadContentPage = () => {
     try {
       const fileName = media.split('/').pop();
       const contentType = 'video/mp4';
-      const presignedUrl = await backoff(getPresignedUrl, 2, 1000, 10000)(fileName, contentType);
+      const presignedPost = await backoff(getPresignedPost, 2, 1000, 10000)(fileName, contentType);
 
-      // Upload video to S3
+      // Upload video to S3 via pre-signed POST (enforces server-side size limit)
       const isUploaded = await backoff(
-          await uploadVideo({uri: media, type: contentType}, presignedUrl, (progressEvent) => {
-            const percentage = progressEvent.loaded / progressEvent.total;
-            setProgress(percentage * 0.7); // Update progress (up to 70% for S3 upload)
-          }), 3, 1000, 30000);
+          () => uploadVideo({uri: media, type: contentType}, presignedPost),
+          3, 1000, 30000
+      )();
       if (!isUploaded) {
         throw new Error('Video upload failed.');
       }
       setProgress(0.8); // After S3 upload, progress to 80%
 
-      // Generate metadata and save to DynamoDB
+      // Generate metadata and save to DynamoDB — key comes from the presigned POST response
       const geoLocation = await fetchGeoLocation();
       const metadata = new VideoMetadata({
-        videoId: presignedUrl.split('?')[0].split('/').pop(),
+        videoId: presignedPost.key,
         description,
         hashtags,
         muteByDefault,
@@ -150,7 +171,7 @@ const UploadContentPage = () => {
       await new Promise((r) => setTimeout(r, 1000));
       resetState();
     } catch (error) {
-      console.error('Error submitting media:', error);
+      console.error('Error submitting media:', error.message);
     } finally {
       setIsSubmitting(false);
       setTimeout(() => setProgress(0), 1000); // Reset progress after 1 second
@@ -181,7 +202,7 @@ const UploadContentPage = () => {
   const addHashtag = () => {
     const trimmedInput = hashtagInput.trim();
 
-    if (hashtags.length >= 10) setError(ErrorType.TOO_MANY_HASHTAGS);
+    if (hashtags.length >= 20) setError(ErrorType.TOO_MANY_HASHTAGS);
     else if (trimmedInput === '') setError(ErrorType.HASHTAG_EMPTY);
     else if (trimmedInput.length > 15) setError(ErrorType.HASHTAG_TOO_LONG);
     else if (hashtags.includes(trimmedInput)) setError(ErrorType.HASHTAG_DUPLICATE);
@@ -254,12 +275,10 @@ const UploadContentPage = () => {
           {/* Video Preview (Takes Remaining Space) */}
           {media ? (
               <View style={styles.videoContainer}>
-                <Video
-                    source={{ uri: media }}
-                    resizeMode="cover"
-                    isMuted={muteByDefault}
-                    shouldPlay={shouldPlay}
-                    useNativeControls
+                <VideoView
+                    player={player}
+                    contentFit="cover"
+                    nativeControls={true}
                     style={styles.video}
                 />
                 {/* Remove Video Button */}

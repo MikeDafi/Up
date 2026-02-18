@@ -1,4 +1,4 @@
-import React, { useContext, useRef } from 'react';
+import React, { useContext, useRef, useEffect, useCallback } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { Video } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { VideoContext } from '../atoms/contexts';
 import {
   COMPRESSED_S3_BUCKET,
@@ -20,13 +20,78 @@ import {
   VideoFeedType,
 } from '../atoms/constants';
 
+const windowWidth = Dimensions.get('window').width;
+
+// Extracted component so each FlatList item can use the useVideoPlayer hook
+const VideoItem = React.memo(({ item, videoStyle, index, isMuted, shouldPlay, onPlayerReady, onPlayToEnd, onError }) => {
+  const source = `${COMPRESSED_S3_BUCKET}/${item.videoId}`;
+
+  const player = useVideoPlayer(source, (p) => {
+    p.loop = false;
+    p.muted = isMuted;
+  });
+
+  // Register the player instance with the parent ref array
+  useEffect(() => {
+    onPlayerReady?.(index, player);
+    return () => onPlayerReady?.(index, null);
+  }, [player, index, onPlayerReady]);
+
+  // Sync mute state
+  useEffect(() => {
+    if (player) player.muted = isMuted;
+  }, [player, isMuted]);
+
+  // Sync play/pause state
+  useEffect(() => {
+    if (!player) return;
+    if (shouldPlay) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [player, shouldPlay]);
+
+  // Listen for video end
+  useEffect(() => {
+    if (!player) return;
+    const sub = player.addListener('playToEnd', () => {
+      onPlayToEnd?.();
+    });
+    return () => sub.remove();
+  }, [player, onPlayToEnd]);
+
+  // Listen for errors via statusChange
+  useEffect(() => {
+    if (!player) return;
+    const sub = player.addListener('statusChange', ({ status, error: err }) => {
+      if (status === 'error' && err) {
+        onError?.(item.videoId, err.message);
+      }
+    });
+    return () => sub.remove();
+  }, [player, item.videoId, onError]);
+
+  return (
+    <VideoView
+      player={player}
+      style={videoStyle}
+      contentFit="cover"
+      nativeControls={false}
+      allowsVideoFrameAnalysis={false}
+    />
+  );
+});
+
+VideoItem.displayName = 'VideoItem';
+
 const VideoSlide = () => {
   const {
     isMuted,
     isPaused,
     isRefreshing,
     providerHandlePausePress,
-    providerHandlePlaybackStatusUpdate,
+    providerHandlePlayToEnd,
     videoIndexExternalView,
     videoMetadatas,
     videoSlideVideoRefs,
@@ -40,19 +105,30 @@ const VideoSlide = () => {
 
   const scrollViewRef = useRef(null);
 
-  const handleScroll = (event) => {
+  const handleScroll = useCallback((event) => {
     const currentScrollPosition = event.nativeEvent.contentOffset.y;
 
-    // Prevent upward scrolling past the top
+    // Prevent downward scrolling — snap back to top
     if (currentScrollPosition > 0) {
-      scrollViewRef.current.scrollTo({
+      scrollViewRef.current?.scrollTo({
         y: 0,
         animated: false,
       });
     }
-  };
+  }, []);
 
-  const windowWidth = Dimensions.get('window').width;
+  const handlePlayerReady = useCallback((index, player) => {
+    videoSlideVideoRefs.current[index] = player;
+  }, [videoSlideVideoRefs]);
+
+  const handleVideoError = useCallback((videoId, error) => {
+    console.error('Video playback error');
+
+    if (typeof error === 'string' && error.includes('-1102 and domain "NSURLErrorDomain"')) {
+      error = `Failed to load video ${videoId}. Video may not exist in S3 bucket.`;
+    }
+    setVideoError(error);
+  }, [setVideoError]);
 
   const renderItem = ({ item, index }) => {
     const videoStyle = {
@@ -63,31 +139,17 @@ const VideoSlide = () => {
               : '100%',
     };
 
-    const handleVideoError = (videoId, error) => {
-      const videoUrl = `${COMPRESSED_S3_BUCKET}/${videoId}`;
-      console.error(`Video playback error for ID: ${videoId}`);
-      console.error(`Video URL: ${videoUrl}`);
-      console.error(`Error details: ${error}`);
-      
-      if (error.includes('-1102 and domain \\"NSURLErrorDomain\\"')) {
-        error = `Failed to load video ${videoId}. Video may not exist in S3 bucket.`;
-      }
-      setVideoError(error);
-    };
-
     return (
         <TouchableOpacity onPress={providerHandlePausePress} style={{ flex: 1 }} activeOpacity={0.8}>
-          <Video
-              source={{ uri: `${COMPRESSED_S3_BUCKET}/${item.videoId}` }}
-              style={videoStyle}
-              ref={(ref) => (videoSlideVideoRefs.current[index] = ref)}
-              resizeMode={Video.RESIZE_MODE_COVER}
+          <VideoItem
+              item={item}
+              index={index}
+              videoStyle={videoStyle}
               isMuted={isMuted}
               shouldPlay={!isPaused && index === videoIndexExternalView}
-              useNativePlaybackControls
-              downloadFirst
-              onPlaybackStatusUpdate={providerHandlePlaybackStatusUpdate}
-              onError={(error) => handleVideoError(item.videoId, error)}
+              onPlayerReady={handlePlayerReady}
+              onPlayToEnd={providerHandlePlayToEnd}
+              onError={handleVideoError}
           />
         </TouchableOpacity>
     );
@@ -121,7 +183,7 @@ const VideoSlide = () => {
               />
             }
             onScroll={handleScroll}
-            scrollEventThrottle={16}
+            scrollEventThrottle={200}
         >
           <FlatList
               ref={videoSlideFlatListRef}
@@ -133,7 +195,7 @@ const VideoSlide = () => {
               }
               horizontal
               pagingEnabled
-              keyExtractor={(item, index) => `${item.videoId}-${index}`}
+              keyExtractor={(item) => item.videoId}
               viewabilityConfig={viewabilityConfig.current}
               onViewableItemsChanged={onViewableItemsChanged}
               onEndReached={() => fetchNewVideos(false, false)}
@@ -144,7 +206,7 @@ const VideoSlide = () => {
                 offset: windowWidth * index,
                 index,
               })}
-              initialNumToRender={3}
+              initialNumToRender={1}
               maxToRenderPerBatch={2}
               windowSize={5}
               renderItem={renderItem}

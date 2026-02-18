@@ -35,12 +35,13 @@ export const backoff = (
 
 export const handleResponse = async (response, actionDescription = "Request failed") => {
   if (!response.ok) {
+    // Read as text first — response.json() consumes the stream and prevents fallback reads
+    const bodyText = await response.text();
     let errorDetails;
     try {
-      // Attempt to parse JSON error details if available
-      errorDetails = await response.json();
+      errorDetails = JSON.parse(bodyText);
     } catch {
-      errorDetails = await response.text(); // Fallback to plain text
+      errorDetails = bodyText || null;
     }
 
     const errorMessage = `${actionDescription}. Status: ${response.status} ${response.statusText}. ${
@@ -52,27 +53,4 @@ export const handleResponse = async (response, actionDescription = "Request fail
   return response;
 };
 
-export const generateUUID = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-};
-
-
-
-// Monkey patch global objects for debugging purposes
-// const originalSetTimeout = global.setTimeout;
-// global.setTimeout = (fn, delay, ...args) => {
-//   console.log(`setTimeout called: ${delay}ms`, fn, args);
-//   return originalSetTimeout(fn, delay, ...args);
-// };
-//
-// const originalFetch = global.fetch;
-// global.fetch = async (...args) => {
-//   console.log('Fetch called with args:', args);
-//   const result = await originalFetch(...args);
-//   console.log('Fetch resolved with args:', args);
-//   return result;
-// };
+export { randomUUID as generateUUID } from 'expo-crypto';
