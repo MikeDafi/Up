@@ -16,7 +16,7 @@ export const cacheData = async (key, data) => {
     try {
         await AsyncStorage.setItem(key, JSON.stringify(data));
     } catch (error) {
-        console.error(`Failed to cache data for key ${key}:`, error);
+        console.error('Failed to cache data:', error.message);
     }
 };
 
@@ -28,7 +28,7 @@ export const retrieveCachedData = async (key, fallback = null) => {
         }
         return data ? JSON.parse(data) : data;
     } catch (error) {
-        console.error(`Failed to retrieve cached data for key ${key}:`, error);
+        console.error('Failed to retrieve cached data:', error.message);
         return fallback;
     }
 };
@@ -91,7 +91,18 @@ export const getUUIDCache = async () => {
 };
 
 export const getHashtagConfidenceScoreMetadatasCache = async (video_feed_type) => {
-    return await retrieveCachedData(`${video_feed_type}/${HASHTAG_CONFIDENCE_SCORES_KEY}`, {});
+    const raw = await retrieveCachedData(`${video_feed_type}/${HASHTAG_CONFIDENCE_SCORES_KEY}`, {});
+    // Normalize: heal any entries corrupted into bare numbers (e.g. from a previous applyScoreDecay bug)
+    const normalized = {};
+    for (const [hashtag, value] of Object.entries(raw)) {
+        if (typeof value === 'number') {
+            normalized[hashtag] = { score: value, last_updated: Date.now() };
+        } else if (value && typeof value === 'object' && typeof value.score === 'number') {
+            normalized[hashtag] = value;
+        }
+        // Drop entries that are null, undefined, or otherwise malformed
+    }
+    return normalized;
 };
 
 export const updateHashtagConfidenceScoreMetadatasCache = async (video_feed_type,confidenceScores) => {

@@ -16,7 +16,7 @@ export const hasAcceptedEULA = async () => {
     const acceptedVersion = await AsyncStorage.getItem(EULA_ACCEPTED_VERSION_KEY);
     return accepted === 'true' && acceptedVersion === CURRENT_EULA_VERSION;
   } catch (error) {
-    console.error('Error checking EULA acceptance:', error);
+    console.error('Error checking EULA acceptance:', error.message);
     return false;
   }
 };
@@ -30,7 +30,7 @@ export const acceptEULA = async () => {
     await AsyncStorage.setItem(EULA_ACCEPTED_VERSION_KEY, CURRENT_EULA_VERSION);
     return true;
   } catch (error) {
-    console.error('Error accepting EULA:', error);
+    console.error('Error accepting EULA:', error.message);
     return false;
   }
 };
@@ -43,7 +43,7 @@ export const getBlockedUsers = async () => {
     const blocked = await AsyncStorage.getItem(BLOCKED_USERS_KEY);
     return blocked ? JSON.parse(blocked) : [];
   } catch (error) {
-    console.error('Error getting blocked users:', error);
+    console.error('Error getting blocked users:', error.message);
     return [];
   }
 };
@@ -60,7 +60,7 @@ export const blockUser = async (uploaderId) => {
     }
     return true;
   } catch (error) {
-    console.error('Error blocking user:', error);
+    console.error('Error blocking user:', error.message);
     return false;
   }
 };

@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Text, View, ActivityIndicator} from 'react-native';
+import {Text, View, ActivityIndicator, AppState} from 'react-native';
 import PropTypes from 'prop-types';
 import {VideoContext} from '../atoms/contexts';
 
@@ -7,7 +7,7 @@ import {
   MAX_REATTEMPT_FETCHING_FEED_INTERVAL, NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE,
   NUM_VIDEOS_TO_REQUEST,
   REATTEMPT_FETCHING_FEED_INTERVAL,
-  VIDEO_REFRESH_PERIOD_SECONDS,
+  VIDEO_REFRESH_PERIOD_MS,
   VideoFeedType
 } from '../atoms/constants';
 import {fetchFeed} from '../atoms/dynamodb';
@@ -23,7 +23,7 @@ import {
   getUUIDCache
 } from '../atoms/videoCacheStorage';
 import {VideoMetadata} from '../atoms/VideoMetadata';
-import {calculateAndUpdateConfidenceScoreCache} from "../atoms/confidencescores";
+import {calculateAndUpdateConfidenceScoreCache, flushConfidenceScores} from "../atoms/confidencescores";
 import TemporaryWarningBanner from "./TemporaryWarningBanner";
 import {getBlockedUsers} from '../atoms/moderation';
 
@@ -131,41 +131,59 @@ const VideoProvider = ({children, video_feed_type}) => {
   useEffect(() => { videoMetadatasRef.current = videoMetadatas; }, [videoMetadatas]);
   useEffect(() => { videoIndexExternalViewRef.current = videoIndexExternalView; }, [videoIndexExternalView]);
 
+  // Flush in-memory confidence scores to AsyncStorage when app goes to background
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        flushConfidenceScores();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   const checkVideoCache = async () => {
     if (checkedCache) {
       return;
     }
-    const cachedCurrentVideoMetadatas = await getVideoMetadatasCache(video_feed_type);
-    const cachedIndex = await getVideoIndexIdealStateCache(video_feed_type);
+    // Parallel cache reads — both are independent AsyncStorage.getItem calls
+    const [cachedCurrentVideoMetadatas, cachedIndex] = await Promise.all([
+      getVideoMetadatasCache(video_feed_type),
+      getVideoIndexIdealStateCache(video_feed_type),
+    ]);
     const startingVideoIndexIdealState = cachedIndex + 1;
-    if (cachedCurrentVideoMetadatas) {
+    if (cachedCurrentVideoMetadatas && cachedCurrentVideoMetadatas.length > 0) {
       const shrunkenVideoMetadatas = cachedCurrentVideoMetadatas.slice(startingVideoIndexIdealState, cachedCurrentVideoMetadatas.length);
       setVideoMetadatas(shrunkenVideoMetadatas);
+      setCheckedCache(true);
+      // Fire-and-forget: persist trimmed cache + fetch more if running low
       setVideoIndexIdealStateCache(video_feed_type, startingVideoIndexIdealState);
       setVideoMetadatasCache(video_feed_type, shrunkenVideoMetadatas);
 
       if (shrunkenVideoMetadatas.length < NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE) {
-        await fetchNewVideos();
+        fetchNewVideos();
       }
     } else {
-      await fetchNewVideos();
+      // No cache — mark checked immediately so UI transitions to retry state, then fetch
+      setCheckedCache(true);
+      fetchNewVideos();
     }
-    setCheckedCache(true);
   }
 
 
-  const keepUnSeenVideoMetadatas = async (candidateVideos) => {
-    const seenVideoMetadatas = await getSeenVideoMetadatasCache();
+  const filterUnseenAndUnblocked = async (candidateVideos) => {
+    const [seenVideoMetadatas, blocked] = await Promise.all([
+      getSeenVideoMetadatasCache(),
+      getBlockedUsers(),
+    ]);
     const seenVideoIds = new Set(seenVideoMetadatas.map(v => v.videoId));
-    return candidateVideos.filter(video => !seenVideoIds.has(video.videoId));
-  }
-
-  const filterBlockedContent = async (videos) => {
-    const blocked = await getBlockedUsers();
-    if (blocked.length === 0) return videos;
-    return videos.filter(video => {
-      const uploaderId = video.videoId.split('-')[0];
-      return !blocked.includes(uploaderId);
+    const blockedSet = new Set(blocked);
+    return candidateVideos.filter(video => {
+      if (seenVideoIds.has(video.videoId)) return false;
+      if (blockedSet.size > 0) {
+        const uploaderId = video.videoId.split('-')[0];
+        if (blockedSet.has(uploaderId)) return false;
+      }
+      return true;
     });
   }
 
@@ -202,11 +220,11 @@ const VideoProvider = ({children, video_feed_type}) => {
     }
 
     if (isManual) {
-      if (!lastTimeRefreshed || (new Date() - lastTimeRefreshed) > VIDEO_REFRESH_PERIOD_SECONDS) {
+      if (!lastTimeRefreshed || (new Date() - lastTimeRefreshed) > VIDEO_REFRESH_PERIOD_MS) {
         setLastTimeRefreshed(new Date());
       } else {
         setTimeout(() => setRefreshing(false), 1000);
-        const minutes = Math.floor((VIDEO_REFRESH_PERIOD_SECONDS - (new Date() - lastTimeRefreshed)) / 60000);
+        const minutes = Math.floor((VIDEO_REFRESH_PERIOD_MS - (new Date() - lastTimeRefreshed)) / 60000);
         setTemporaryWarning(`Wait ${minutes} minutes before refreshing again`);
         setTimeout(() => setTemporaryWarning(""), 2000);
         return;
@@ -229,12 +247,11 @@ const VideoProvider = ({children, video_feed_type}) => {
       videoMetadataBatch = response.video_feed.map(videoRawMetadata => new VideoMetadata(videoRawMetadata));
       videoMetadataBatch = deduplicateAcrossFeeds(videoMetadataBatch, video_feed_type);
     } catch (err) {
-      console.error("Error fetching videos:", err);
+      console.error("Error fetching videos:", err.message);
       setError(err.message);
     }
 
-    let unSeenVideoMetadatasBatch = await keepUnSeenVideoMetadatas(videoMetadataBatch);
-    unSeenVideoMetadatasBatch = await filterBlockedContent(unSeenVideoMetadatasBatch);
+    let unSeenVideoMetadatasBatch = await filterUnseenAndUnblocked(videoMetadataBatch);
 
     if (unSeenVideoMetadatasBatch.length === 0) {
       setRefreshing(false);
@@ -242,19 +259,24 @@ const VideoProvider = ({children, video_feed_type}) => {
       return;
     }
 
+    let videosToCache;
     if (isManual) {
-      setVideoMetadatas(unSeenVideoMetadatasBatch);
+      videosToCache = unSeenVideoMetadatasBatch;
+      setVideoMetadatas(videosToCache);
       await triggerVideoIndex(0);
     } else {
-      const updatedVideoMetadatas = [...currentVideoMetadatas, ...unSeenVideoMetadatasBatch];
-      setVideoMetadatas(updatedVideoMetadatas);
+      videosToCache = [...currentVideoMetadatas, ...unSeenVideoMetadatasBatch];
+      setVideoMetadatas(videosToCache);
       await triggerVideoIndex(currentVideoIndex);
     }
 
-    await setVideoMetadatasCache(video_feed_type, isManual ? unSeenVideoMetadatasBatch : currentVideoMetadatas);
-    await updateSeenVideoMetadatasCache(video_feed_type, unSeenVideoMetadatasBatch);
-
     setRefreshing(false);
+
+    // Fire-and-forget: parallel cache writes don't affect rendered state
+    Promise.all([
+      setVideoMetadatasCache(video_feed_type, videosToCache),
+      updateSeenVideoMetadatasCache(video_feed_type, unSeenVideoMetadatasBatch),
+    ]).catch(err => console.warn('Cache write failed:', err.message));
   };
 
 
@@ -263,7 +285,7 @@ const VideoProvider = ({children, video_feed_type}) => {
 
     if (checkedCache && videoMetadatas.length === 0 && reAttemptFetchingFeedInterval < MAX_REATTEMPT_FETCHING_FEED_INTERVAL) {
       retryFetch = setTimeout(async () => {
-        await fetchNewVideos(true);
+        await fetchNewVideos(false);
         setreAttemptFetchingFeedInterval(Math.min(reAttemptFetchingFeedInterval * 2, MAX_REATTEMPT_FETCHING_FEED_INTERVAL));
       }, reAttemptFetchingFeedInterval);
     }
@@ -279,7 +301,21 @@ const VideoProvider = ({children, video_feed_type}) => {
     const timeout = setTimeout(() => {
       setTemporaryWarning("");
       setVideoError("");
-      setVideoMetadatas([]);
+
+      // Remove only the broken video instead of wiping the entire feed
+      const currentIndex = videoIndexExternalViewRef.current;
+      const currentMetadatas = videoMetadatasRef.current;
+      const filtered = currentMetadatas.filter((_, i) => i !== currentIndex);
+
+      if (filtered.length > 0) {
+        setVideoMetadatas(filtered);
+        setVideoMetadatasCache(video_feed_type, filtered);
+        const nextIndex = Math.min(currentIndex, filtered.length - 1);
+        triggerVideoIndex(nextIndex);
+      } else {
+        // All videos are broken — clear and let the retry useEffect re-fetch
+        setVideoMetadatas([]);
+      }
     }, 3000);
 
     return () => clearTimeout(timeout);
@@ -287,9 +323,9 @@ const VideoProvider = ({children, video_feed_type}) => {
 
   const triggerVideoIndex = async (index, scrollList = true, animated = false) => {
     const currentMetadatas = videoMetadatasRef.current;
-    const currentVideoSlideVideoRef = videoSlideVideoRefs.current[index];
-    if (currentVideoSlideVideoRef) {
-      await currentVideoSlideVideoRef.setPositionAsync(0);
+    const currentPlayer = videoSlideVideoRefs.current[index];
+    if (currentPlayer) {
+      currentPlayer.currentTime = 0;
     }
 
     setVideoIndexIdealState(index);
@@ -331,26 +367,36 @@ const VideoProvider = ({children, video_feed_type}) => {
     itemVisiblePercentThreshold: 50,
   });
 
-  const onViewableItemsChanged = async ({viewableItems}) => {
+  const onViewableItemsChanged = ({viewableItems}) => {
     if (viewableItems.length > 0) {
-      const currentIndex = videoIndexExternalViewRef.current;
-      const currentMetadatas = videoMetadatasRef.current;
-      const currentVideoRef = videoSlideVideoRefs.current[currentIndex];
-      if (currentVideoRef && currentMetadatas[currentIndex]) {
-        const status = await currentVideoRef.getStatusAsync();
-        const percentageSeenOfVideo = status.durationMillis
-            ? status.positionMillis / status.durationMillis
-            : 0;
-        if (percentageSeenOfVideo > 0) {
-          await calculateAndUpdateConfidenceScoreCache(video_feed_type, currentMetadatas[currentIndex].hashtags,
-              {percentageSeenOfVideo: percentageSeenOfVideo});
-        }
-      }
-      setVideoIndexExternalView(viewableItems[0].index);
-      await setVideoIndexIdealStateCache(video_feed_type, viewableItems[0].index);
+      const previousIndex = videoIndexExternalViewRef.current;
+      const newIndex = viewableItems[0].index;
+
+      // Immediate state updates — unblocks video playback transition
+      setVideoIndexExternalView(newIndex);
       setMuted(video_feed_type === VideoFeedType.VIDEO_FOCUSED_FEED);
       setPaused(false);
       setLiked(false);
+
+      // Deferred: analytics for previous video + cache write (fire-and-forget)
+      const currentMetadatas = videoMetadatasRef.current;
+      const previousPlayer = videoSlideVideoRefs.current[previousIndex];
+      (async () => {
+        try {
+          if (previousPlayer && currentMetadatas[previousIndex]) {
+            const percentageSeenOfVideo = previousPlayer.duration > 0
+                ? previousPlayer.currentTime / previousPlayer.duration
+                : 0;
+            if (percentageSeenOfVideo > 0) {
+              await calculateAndUpdateConfidenceScoreCache(video_feed_type, currentMetadatas[previousIndex].hashtags,
+                  {percentageSeenOfVideo: percentageSeenOfVideo});
+            }
+          }
+          await setVideoIndexIdealStateCache(video_feed_type, newIndex);
+        } catch (err) {
+          console.warn('Deferred viewability analytics failed:', err.message);
+        }
+      })();
     }
   }
 
@@ -358,23 +404,21 @@ const VideoProvider = ({children, video_feed_type}) => {
     setPaused((prev) => !prev);
   };
 
-  const providerHandlePlaybackStatusUpdate = async ({ didJustFinish }) => {
-    if (didJustFinish) {
-      const currentIndex = videoIndexExternalViewRef.current;
-      const currentMetadatas = videoMetadatasRef.current;
-      const currentVideoSlideVideoRef = videoSlideVideoRefs.current[currentIndex];
-      if (currentVideoSlideVideoRef) {
-        await currentVideoSlideVideoRef.setPositionAsync(0);
-      }
+  const providerHandlePlayToEnd = async () => {
+    const currentIndex = videoIndexExternalViewRef.current;
+    const currentMetadatas = videoMetadatasRef.current;
+    const currentPlayer = videoSlideVideoRefs.current[currentIndex];
+    if (currentPlayer) {
+      currentPlayer.currentTime = 0;
+    }
 
-      if (currentMetadatas[currentIndex]) {
-        await calculateAndUpdateConfidenceScoreCache(video_feed_type, currentMetadatas[currentIndex].hashtags, {percentageSeenOfVideo: 1});
-      }
+    if (currentMetadatas[currentIndex]) {
+      await calculateAndUpdateConfidenceScoreCache(video_feed_type, currentMetadatas[currentIndex].hashtags, {percentageSeenOfVideo: 1});
+    }
 
-      if (currentIndex < currentMetadatas.length - 1) {
-        const nextIndex = currentIndex + 1;
-        await triggerVideoIndex(nextIndex, true, true);
-      }
+    if (currentIndex < currentMetadatas.length - 1) {
+      const nextIndex = currentIndex + 1;
+      await triggerVideoIndex(nextIndex, true, true);
     }
   }
 
@@ -415,7 +459,7 @@ const VideoProvider = ({children, video_feed_type}) => {
         setVideoError,
         videoIndexExternalView,
         videoMetadatas,
-        providerHandlePlaybackStatusUpdate,
+        providerHandlePlayToEnd,
         videoSlideFlatListRef,
         videoSlideVideoRefs,
         viewabilityConfig,
