@@ -45,15 +45,17 @@ jobs:
 
       - name: Get latest staging update
         id: get-staging
+        env:
+          INPUT_GROUP_ID: ${{ inputs.update_group_id }}
         run: |
-          if [ -n "${{ inputs.update_group_id }}" ]; then
-            echo "update_id=${{ inputs.update_group_id }}" >> $GITHUB_OUTPUT
+          if [ -n "$INPUT_GROUP_ID" ]; then
+            echo "update_id=$INPUT_GROUP_ID" >> $GITHUB_OUTPUT
           else
             # Get the latest update from staging branch
             # Format: { name, id, currentPage: [{ group, ... }] }
             LATEST=$(eas update:list --branch staging --limit 1 --json --non-interactive | jq -r '.currentPage[0].group')
             if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
-              echo "❌ No staging updates found. Deploy to staging first."
+              echo "No staging updates found. Deploy to staging first."
               exit 1
             fi
             echo "update_id=$LATEST" >> $GITHUB_OUTPUT
@@ -61,13 +63,19 @@ jobs:
           fi
 
       - name: Promote to Production
+        env:
+          UPDATE_ID: ${{ steps.get-staging.outputs.update_id }}
+          RELEASE_MESSAGE: ${{ inputs.message }}
         run: |
-          echo "Promoting update ${{ steps.get-staging.outputs.update_id }} to production..."
-          eas update:republish --group ${{ steps.get-staging.outputs.update_id }} --branch production --message "${{ inputs.message }}"
+          echo "Promoting update $UPDATE_ID to production..."
+          eas update:republish --group "$UPDATE_ID" --branch production --message "$RELEASE_MESSAGE"
 
       - name: Summary
+        env:
+          UPDATE_ID: ${{ steps.get-staging.outputs.update_id }}
+          RELEASE_MESSAGE: ${{ inputs.message }}
         run: |
-          echo "✅ Successfully promoted to production!"
-          echo "Update Group: ${{ steps.get-staging.outputs.update_id }}"
-          echo "Message: ${{ inputs.message }}"
+          echo "Successfully promoted to production!"
+          echo "Update Group: $UPDATE_ID"
+          echo "Message: $RELEASE_MESSAGE"
 

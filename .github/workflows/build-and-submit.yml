@@ -48,21 +48,28 @@ jobs:
 
       - name: Update version in app.json
         if: ${{ inputs.version != '' }}
+        env:
+          APP_VERSION: ${{ inputs.version }}
         run: |
           # Update version in app.json
-          jq '.expo.version = "${{ inputs.version }}"' app.json > tmp.json && mv tmp.json app.json
-          echo "Updated version to ${{ inputs.version }}"
+          jq --arg v "$APP_VERSION" '.expo.version = $v' app.json > tmp.json && mv tmp.json app.json
+          echo "Updated version to $APP_VERSION"
           cat app.json | jq '.expo.version'
 
       - name: Build and Submit iOS
+        env:
+          BUILD_PROFILE: ${{ inputs.profile }}
         run: |
-          eas build --platform ios --profile ${{ inputs.profile }} --auto-submit --non-interactive
+          eas build --platform ios --profile "$BUILD_PROFILE" --auto-submit --non-interactive
 
       - name: Summary
+        env:
+          BUILD_PROFILE: ${{ inputs.profile }}
+          APP_VERSION: ${{ inputs.version || 'unchanged' }}
         run: |
-          echo "✅ Build submitted to App Store Connect!"
-          echo "Profile: ${{ inputs.profile }}"
-          echo "Version: ${{ inputs.version || 'unchanged' }}"
+          echo "Build submitted to App Store Connect!"
+          echo "Profile: $BUILD_PROFILE"
+          echo "Version: $APP_VERSION"
           echo ""
           echo "Next steps:"
           echo "1. Wait for processing in App Store Connect (~10-30 min)"

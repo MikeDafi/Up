@@ -46,10 +46,14 @@ jobs:
         run: npm install
 
       - name: Publish to Staging
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "${{ github.event_name }}" == "push" ]; then
-            MESSAGE="${{ github.event.head_commit.message }}"
+          if [ "$EVENT_NAME" == "push" ]; then
+            MESSAGE="$COMMIT_MESSAGE"
           else
-            MESSAGE="${{ github.event.pull_request.title }}"
+            MESSAGE="$PR_TITLE"
           fi
           eas update --branch staging --message "$MESSAGE"
