@@ -46,9 +46,7 @@
     "plugins": [
       "expo-location"
     ],
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/bd75a844-075d-4325-a99a-dc25a4a50d26"
     }
