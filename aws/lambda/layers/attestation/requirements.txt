@@ -1,0 +1,12 @@
+# Dependencies for the attestation verification Lambda Layer (iOS only).
+#
+# Package this layer by running:
+#   pip install -r requirements.txt -t python/
+#   cp attestation_verifier.py python/
+#   zip -r attestation-layer.zip python/
+#
+# Then upload as a Lambda Layer and attach to all API-facing Lambdas.
+
+PyJWT>=2.8.0,<3.0.0
+cbor2>=5.6.0,<6.0.0
+cryptography>=42.0.0,<44.0.0

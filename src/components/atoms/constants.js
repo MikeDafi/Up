@@ -11,6 +11,12 @@ export const UPDATE_USER_DATA_URL = `https://em6qi5e4cl.execute-api.us-east-2.am
 
 export const S3_API_URL = `https://o28an1f9e8.execute-api.us-east-2.amazonaws.com/${ENV_NAME}`;
 
+// Attestation challenge endpoint
+export const ATTESTATION_CHALLENGE_URL = `https://lns75kqv74.execute-api.us-east-2.amazonaws.com/${ENV_NAME}/challenge`;
+
+export const SESSION_TOKEN_KEY = 'session_token';
+export const ATTESTED_KEY_ID_KEY = 'attested_key_id';
+
 export const COMPRESSED_S3_BUCKET = `https://up-compressed-content.s3.us-east-2.amazonaws.com`;
 
 export const GET_FEED_URL = `https://qi6dd69zxd.execute-api.us-east-2.amazonaws.com/${ENV_NAME}/feed`;
