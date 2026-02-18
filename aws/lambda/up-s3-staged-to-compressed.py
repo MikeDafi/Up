@@ -1,94 +1,133 @@
+import logging
 import boto3
 import os
+import re
 import subprocess
 import uuid
 
-# Initialize S3 client
-s3_client = boto3.client('s3')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
-# Environment variables
+s3_client = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+metadata_table = dynamodb.Table('up-videometadata')
+
 COMPRESSED_BUCKET = "up-compressed-content"
 TEMP_DIR = "/tmp"
 
+# Must match the key format produced by up-create-pre-signed-url
+VALID_KEY_PATTERN = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[a-zA-Z0-9_-]{1,50}\.(mp4|mov|m4v|webm)$'
+)
+
+VIDEOID_GSI = 'videoId-uploadedAt-index'
+
+
+def update_compression_status(video_id, status):
+    """Resolve the item's PK via videoId GSI, then update compressionStatus."""
+    try:
+        response = metadata_table.query(
+            IndexName=VIDEOID_GSI,
+            KeyConditionExpression='videoId = :vid',
+            ExpressionAttributeValues={':vid': video_id},
+            ProjectionExpression='#r, uploadedAt',
+            ExpressionAttributeNames={'#r': 'region'},
+            Limit=1,
+        )
+        items = response.get('Items', [])
+        if not items:
+            logger.warning("No metadata record found for videoId %s, skipping status update", video_id)
+            return
+
+        region = items[0]['region']
+        uploaded_at = items[0]['uploadedAt']
+
+        metadata_table.update_item(
+            Key={'region': region, 'uploadedAt': uploaded_at},
+            UpdateExpression='SET compressionStatus = :s',
+            ExpressionAttributeValues={':s': status},
+        )
+        logger.info("Updated compressionStatus to %s for %s", status, video_id)
+    except Exception as e:
+        logger.error("Failed to update compressionStatus for %s: %s", video_id, e)
+
 def list_tmp_directory():
-    """Prints the contents of the /tmp directory"""
-    print(f"Contents of {TEMP_DIR}:")
+    logger.debug("Contents of %s:", TEMP_DIR)
     for root, dirs, files in os.walk(TEMP_DIR):
         for name in files:
-            print(f"File: {os.path.join(root, name)}")
+            logger.debug("File: %s", os.path.join(root, name))
         for name in dirs:
-            print(f"Directory: {os.path.join(root, name)}")
+            logger.debug("Directory: %s", os.path.join(root, name))
 
 def lambda_handler(event, context):
-    # Process each record in the S3 event
     for record in event["Records"]:
+        download_path = None
+        compressed_path = None
         try:
-            # Extract bucket name and object key
             source_bucket = record["s3"]["bucket"]["name"]
             object_key = record["s3"]["object"]["key"]
-            print(f"Processing file {object_key} from bucket {source_bucket}")
+            logger.info("Processing file %s from bucket %s", object_key, source_bucket)
 
-            # Print contents of /tmp before processing
+            if not VALID_KEY_PATTERN.match(object_key):
+                raise ValueError(f"Rejecting invalid object key: {object_key!r}")
+
             list_tmp_directory()
 
-            # Download the video from the source S3 bucket
-            download_path = os.path.join(TEMP_DIR, str(uuid.uuid4()) + os.path.basename(object_key))
+            # UUID-only local filenames — object_key never touches local paths
+            download_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}.mp4")
             s3_client.download_file(source_bucket, object_key, download_path)
-            print(f"Downloaded {object_key} to {download_path}")
+            logger.info("Downloaded %s to %s", object_key, download_path)
 
-            # Print contents of /tmp after downloading the video
             list_tmp_directory()
 
-            # Define the compressed file path
-            compressed_path = os.path.join(TEMP_DIR, "compressed_" + os.path.basename(object_key))
-
-            # Compress the video using FFmpeg
+            compressed_path = os.path.join(TEMP_DIR, f"compressed_{uuid.uuid4()}.mp4")
             compress_video(download_path, compressed_path)
 
-            # Print contents of /tmp after compression
             list_tmp_directory()
 
-            # Validate compressed file
             if not os.path.exists(compressed_path) or os.path.getsize(compressed_path) == 0:
                 raise Exception(f"Compression failed or output file is empty: {compressed_path}")
 
-            # Upload the compressed video to the target S3 bucket
-            compressed_key = object_key  # Preserve original folder structure and file name
-            s3_client.upload_file(compressed_path, COMPRESSED_BUCKET, compressed_key)
-            print(f"Uploaded compressed file to {COMPRESSED_BUCKET}/{compressed_key}")
+            s3_client.upload_file(compressed_path, COMPRESSED_BUCKET, object_key)
+            logger.info("Uploaded compressed file to %s/%s", COMPRESSED_BUCKET, object_key)
 
-            # Delete the original video from the staging bucket
+            update_compression_status(object_key, "READY")
+
             s3_client.delete_object(Bucket=source_bucket, Key=object_key)
-            print(f"Deleted original file from {source_bucket}/{object_key}")
-
-            # Print contents of /tmp after cleaning up
-            list_tmp_directory()
+            logger.info("Deleted original file from %s/%s", source_bucket, object_key)
 
         except Exception as e:
-            print(f"Error processing file {object_key}: {e}")
+            logger.error("Error processing file %s: %s", object_key, e)
+            update_compression_status(object_key, "FAILED")
             raise e
+        finally:
+            # Clean up /tmp files to prevent "No space left on device" on warm Lambda reuse
+            for path in [download_path, compressed_path]:
+                try:
+                    if path and os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
 
 
 def compress_video(input_path, output_path):
-    """Compress the video using FFmpeg to roughly 720p"""
+    """Compress to H.264/AAC with faststart for streaming."""
     try:
-        # FFmpeg command to compress the video and resize to 720p
         command = [
-            "/opt/bin/ffmpeg",  # FFmpeg binary location in the Lambda layer
-            "-y",  # Overwrite output file if it exists
-            "-i", input_path,  # Input file
-            "-c:v", "libx264",  # Use H.264 codec
-            # "-vf", "scale=trunc(iw/2)*2:720",  # Resize to 720p with even width
-            "-crf", "25",  # Constant Rate Factor (lower is higher quality)
-            "-preset", "slower",  # Encoding speed/quality tradeoff
-            "-c:a", "aac",  # Audio codec
-            "-b:a", "128k",  # Audio bitrate
-            "-movflags", "+faststart",  # Optimize for streaming
+            "/opt/bin/ffmpeg",
+            "-y",
+            "-i", input_path,
+            "-c:v", "libx264",
+            "-crf", "25",
+            "-preset", "medium",  # 'slower' is too expensive for Lambda
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
             output_path
         ]
-        print(f"Running command: {' '.join(command)}")
+        logger.info("Running command: %s", ' '.join(command))
         subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        print(f"Video compression complete: {output_path}")
+        logger.info("Video compression complete: %s", output_path)
     except subprocess.CalledProcessError as e:
-        print(f"FFmpeg compression failed: {e.stderr.decode()}")
+        logger.error("FFmpeg compression failed: %s", e.stderr.decode())
         raise e

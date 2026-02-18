@@ -1,8 +1,12 @@
 import json
+import logging
 import os
 import boto3
 from datetime import datetime, timedelta
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 VIDEOMETADATA_TABLE = 'up-videometadata'
 HASHTAG_TABLE = 'up-hashtag'
@@ -41,7 +45,7 @@ def batch_delete_dynamodb(dynamodb, table_name, keys, stats, stat_key):
                 unprocessed = response.get('UnprocessedItems', {}).get(table_name, [])
                 stats[stat_key] += retry_count - len(unprocessed)
         except ClientError as e:
-            print(f"Batch delete error on {table_name}: {e}")
+            logger.error("Batch delete error on %s: %s", table_name, e)
             stats['errors'] += 1
 
 
@@ -56,10 +60,10 @@ def batch_delete_s3(s3, bucket, keys, stats):
             failed = response.get('Errors', [])
             stats['s3_deleted'] += len(batch) - len(failed)
             for err in failed:
-                print(f"S3 delete failed for {err['Key']}: {err['Message']}")
+                logger.error("S3 delete failed for %s: %s", err['Key'], err['Message'])
                 stats['errors'] += 1
         except ClientError as e:
-            print(f"S3 batch delete error: {e}")
+            logger.error("S3 batch delete error: %s", e)
             stats['errors'] += 1
 
 
@@ -76,7 +80,7 @@ def get_dynamodb_video_ids(dynamodb):
 
 
 def cleanup_old_hashtags(dynamodb, cutoff_date, stats):
-    print(f"Cleaning up hashtags older than {cutoff_date.isoformat()}")
+    logger.info("Cleaning up hashtags older than %s", cutoff_date.isoformat())
 
     paginator = dynamodb.get_paginator('scan')
     keys_to_delete = []
@@ -94,7 +98,7 @@ def cleanup_old_hashtags(dynamodb, cutoff_date, stats):
             try:
                 item_time = parse_timestamp(timestamp_str)
             except ValueError:
-                print(f"Invalid timestamp for hashtag {hashtag}: {timestamp_str}")
+                logger.warning("Invalid timestamp for hashtag %s: %s", hashtag, timestamp_str)
                 stats['errors'] += 1
                 continue
 
@@ -105,7 +109,7 @@ def cleanup_old_hashtags(dynamodb, cutoff_date, stats):
                 })
 
     if keys_to_delete:
-        print(f"Deleting {len(keys_to_delete)} expired hashtags")
+        logger.info("Deleting %d expired hashtags", len(keys_to_delete))
         batch_delete_dynamodb(dynamodb, HASHTAG_TABLE, keys_to_delete, stats, 'hashtags_deleted')
 
 
@@ -116,7 +120,7 @@ def cleanup_old_videos(dynamodb, s3, cutoff_date, stats):
         date = now - timedelta(days=days_ago)
         dates_to_check.append(date.strftime('%Y-%m-%d'))
 
-    print(f"Checking {len(dates_to_check)} date partitions for video metadata")
+    logger.info("Checking %d date partitions for video metadata", len(dates_to_check))
 
     dynamodb_keys_to_delete = []
     s3_keys_to_delete = []
@@ -143,7 +147,7 @@ def cleanup_old_videos(dynamodb, s3, cutoff_date, stats):
                     try:
                         uploaded_at = parse_timestamp(uploaded_at_str)
                     except ValueError:
-                        print(f"Invalid date format for video {video_id}: {uploaded_at_str}")
+                        logger.warning("Invalid date format for video %s: %s", video_id, uploaded_at_str)
                         stats['errors'] += 1
                         continue
 
@@ -157,19 +161,19 @@ def cleanup_old_videos(dynamodb, s3, cutoff_date, stats):
 
         except ClientError as e:
             if 'ResourceNotFoundException' not in str(e):
-                print(f"Error querying partition {date_partition}: {e}")
+                logger.error("Error querying partition %s: %s", date_partition, e)
 
     if dynamodb_keys_to_delete:
-        print(f"Deleting {len(dynamodb_keys_to_delete)} expired video metadata records")
+        logger.info("Deleting %d expired video metadata records", len(dynamodb_keys_to_delete))
         batch_delete_dynamodb(dynamodb, VIDEOMETADATA_TABLE, dynamodb_keys_to_delete, stats, 'dynamodb_deleted')
 
     if s3_keys_to_delete:
-        print(f"Deleting {len(s3_keys_to_delete)} expired S3 files")
+        logger.info("Deleting %d expired S3 files", len(s3_keys_to_delete))
         batch_delete_s3(s3, S3_BUCKET, s3_keys_to_delete, stats)
 
 
 def cleanup_orphaned_s3_files(s3, dynamodb_video_ids, stats):
-    print("Checking for orphaned S3 files")
+    logger.info("Checking for orphaned S3 files")
 
     orphaned_keys = []
     paginator = s3.get_paginator('list_objects_v2')
@@ -183,7 +187,7 @@ def cleanup_orphaned_s3_files(s3, dynamodb_video_ids, stats):
                 stats['orphaned_s3_found'] += 1
 
     if orphaned_keys:
-        print(f"Deleting {len(orphaned_keys)} orphaned S3 files")
+        logger.info("Deleting %d orphaned S3 files", len(orphaned_keys))
         batch_delete_s3(s3, S3_BUCKET, orphaned_keys, stats)
 
 
@@ -193,10 +197,10 @@ def lambda_handler(event, context):
 
     now = datetime.now()
     cutoff_date = now - timedelta(days=EXPIRY_DAYS)
-    print(f"Cleaning up records older than {cutoff_date.isoformat()} ({EXPIRY_DAYS} days)")
+    logger.info("Cleaning up records older than %s (%d days)", cutoff_date.isoformat(), EXPIRY_DAYS)
 
     dynamodb_video_ids = get_dynamodb_video_ids(dynamodb)
-    print(f"Found {len(dynamodb_video_ids)} video records in DynamoDB")
+    logger.info("Found %d video records in DynamoDB", len(dynamodb_video_ids))
 
     stats = {
         'partitions_queried': 0,
@@ -216,20 +220,20 @@ def lambda_handler(event, context):
         cleanup_orphaned_s3_files(s3, dynamodb_video_ids, stats)
         cleanup_old_hashtags(dynamodb, cutoff_date, stats)
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        logger.exception("Unexpected error during cleanup")
         stats['errors'] += 1
 
-    print(f"=== Cleanup Summary ===")
-    print(f"Date partitions queried: {stats['partitions_queried']}")
-    print(f"Videos scanned: {stats['videos_scanned']}")
-    print(f"Expired videos found: {stats['expired_found']}")
-    print(f"DynamoDB video records deleted: {stats['dynamodb_deleted']}")
-    print(f"S3 files scanned: {stats['s3_scanned']}")
-    print(f"S3 files deleted: {stats['s3_deleted']}")
-    print(f"Orphaned S3 files found: {stats['orphaned_s3_found']}")
-    print(f"Hashtags scanned: {stats['hashtags_scanned']}")
-    print(f"Hashtags deleted: {stats['hashtags_deleted']}")
-    print(f"Errors: {stats['errors']}")
+    logger.info("=== Cleanup Summary ===")
+    logger.info("Date partitions queried: %d", stats['partitions_queried'])
+    logger.info("Videos scanned: %d", stats['videos_scanned'])
+    logger.info("Expired videos found: %d", stats['expired_found'])
+    logger.info("DynamoDB video records deleted: %d", stats['dynamodb_deleted'])
+    logger.info("S3 files scanned: %d", stats['s3_scanned'])
+    logger.info("S3 files deleted: %d", stats['s3_deleted'])
+    logger.info("Orphaned S3 files found: %d", stats['orphaned_s3_found'])
+    logger.info("Hashtags scanned: %d", stats['hashtags_scanned'])
+    logger.info("Hashtags deleted: %d", stats['hashtags_deleted'])
+    logger.info("Errors: %d", stats['errors'])
 
     return {
         'statusCode': 200,

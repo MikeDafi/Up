@@ -1,67 +1,54 @@
 import json
+import logging
 import boto3
 import os
 import uuid
 import re
 
-# Initialize the S3 client
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 s3 = boto3.client('s3')
 
-# Allowed content types for video uploads
 ALLOWED_CONTENT_TYPES = {
     'video/mp4',
-    'video/quicktime',  # .mov
+    'video/quicktime',
     'video/x-m4v',
     'video/webm',
 }
 
-# Allowed file extensions
 ALLOWED_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.webm'}
+MAX_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024
 
 def sanitize_filename(filename):
-    """
-    Sanitize filename to prevent path traversal and injection attacks.
-    - Removes path separators
-    - Removes null bytes
-    - Strips leading/trailing whitespace and dots
-    - Only allows alphanumeric, dash, underscore, and single dot for extension
-    """
+    """Strip path traversal, null bytes, and non-alphanumeric chars. Returns None if invalid."""
     if not filename:
         return None
-    
-    # Remove path components (prevent path traversal)
+
     filename = os.path.basename(filename)
-    
-    # Remove null bytes
     filename = filename.replace('\x00', '')
-    
-    # Strip whitespace and dots from edges
     filename = filename.strip('. \t\n\r')
-    
+
     if not filename:
         return None
-    
-    # Extract extension
+
     name, ext = os.path.splitext(filename)
     ext = ext.lower()
-    
-    # Validate extension
+
     if ext not in ALLOWED_EXTENSIONS:
         return None
-    
-    # Sanitize name part: only allow alphanumeric, dash, underscore
-    name = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
-    
-    # Limit length
-    name = name[:50]
-    
+
+    name = re.sub(r'[^a-zA-Z0-9_-]', '_', name)[:50]
+
     return f"{name}{ext}" if name else None
 
 def lambda_handler(event, context):
     bucket_name = 'up-staging-content'
 
     try:
-        # Extract and validate parameters
+        from attestation_verifier import verify_request
+        attestation_result = verify_request(event)
+
         query_params = event.get('queryStringParameters', {})
         if not query_params:
             return {
@@ -72,8 +59,7 @@ def lambda_handler(event, context):
         
         raw_file_name = query_params.get('fileName', '')
         content_type = query_params.get('contentType', '')
-        
-        # Validate content type
+
         if content_type not in ALLOWED_CONTENT_TYPES:
             return {
                 'statusCode': 400,
@@ -81,7 +67,6 @@ def lambda_handler(event, context):
                 'headers': {'Content-Type': 'application/json'}
             }
         
-        # Sanitize filename
         sanitized_name = sanitize_filename(raw_file_name)
         if not sanitized_name:
             return {
@@ -90,33 +75,51 @@ def lambda_handler(event, context):
                 'headers': {'Content-Type': 'application/json'}
             }
         
-        # Generate a unique key for the uploaded file
         file_key = f"{uuid.uuid4()}-{sanitized_name}"
-        
-        # Generate a pre-signed URL
-        presigned_url = s3.generate_presigned_url(
-            'put_object',
-            Params={
-                'Bucket': bucket_name,
-                'Key': file_key,
-                'ContentType': content_type
+
+        # Presigned POST (not presigned URL) — supports server-side content-length enforcement
+        presigned_post = s3.generate_presigned_post(
+            Bucket=bucket_name,
+            Key=file_key,
+            Fields={
+                'Content-Type': content_type,
             },
-            ExpiresIn=300  # URL expires in 5 minutes
+            Conditions=[
+                ['content-length-range', 1, MAX_UPLOAD_SIZE_BYTES],
+                {'Content-Type': content_type},
+            ],
+            ExpiresIn=300
         )
         
-        # Return the pre-signed URL and file key
+        response_body = {
+            'url': presigned_post['url'],
+            'fields': presigned_post['fields'],
+            'key': file_key,
+            'maxSizeBytes': MAX_UPLOAD_SIZE_BYTES,
+        }
+        if attestation_result.get('session_token'):
+            response_body['session_token'] = attestation_result['session_token']
+
         return {
             'statusCode': 200,
-            'body': json.dumps({'url': presigned_url, 'key': file_key}),
+            'body': json.dumps(response_body),
+            'headers': {
+                'Content-Type': 'application/json'
+            }
+        }
+    except PermissionError as pe:
+        return {
+            'statusCode': 403,
+            'body': json.dumps({'error': str(pe)}),
             'headers': {
                 'Content-Type': 'application/json'
             }
         }
     except Exception as e:
-        # Handle any errors
+        logger.exception("Error generating pre-signed URL")
         return {
             'statusCode': 500,
-            'body': json.dumps({'error': str(e)}),
+            'body': json.dumps({'error': 'Internal server error'}),
             'headers': {
                 'Content-Type': 'application/json'
             }
