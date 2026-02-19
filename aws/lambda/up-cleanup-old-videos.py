@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 VIDEOMETADATA_TABLE = 'up-videometadata'
-HASHTAG_TABLE = 'up-hashtag'
+HASHTAG_TABLE = 'up-hashtag-videos'
 GSI_NAME = 'datePartition-uploadedAt-index'
 S3_BUCKET = 'up-compressed-content'
 EXPIRY_DAYS = 30

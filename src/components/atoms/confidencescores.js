@@ -214,7 +214,6 @@ export const uploadHashtagConfidenceScores = async () => {
         return {};
       }
     }
-    console.debug("Uploading hashtag confidence scores");
     await setLastUploadHashtagTimestamp(now);
     return payload;
   } catch (error) {

@@ -5,7 +5,6 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Image, StyleSheet, View, Text } from 'react-native';
 import { applyDecayToAllConfidenceScores } from "./src/components/atoms/confidencescores";
-import { aggregateUpdateUserData } from "./src/components/atoms/user_functions";
 import { isTrustedDevice } from "./src/components/atoms/attestation";
 import { hasAcceptedEULA, acceptEULA } from "./src/components/atoms/moderation";
 import EULAScreen from "./src/components/molecules/EULAScreen";
@@ -17,26 +16,25 @@ export default function App() {
   const [eulaAccepted, setEulaAccepted] = useState(null); // null: loading, false: show EULA, true: continue
 
   useEffect(() => {
-    const checkDeviceTrust = async () => {
-      const trusted = await isTrustedDevice();
-      setTrusted(trusted);
+    const initialize = async () => {
+      // Run device trust + EULA check in parallel — neither depends on the other
+      const [trustedResult, acceptedResult] = await Promise.all([
+        isTrustedDevice(),
+        hasAcceptedEULA(),
+      ]);
 
-      if (trusted) {
-        const accepted = await hasAcceptedEULA();
-        setEulaAccepted(accepted);
+      setTrusted(trustedResult);
+      setEulaAccepted(acceptedResult);
 
-        if (accepted) {
-          try {
-            await applyDecayToAllConfidenceScores();
-            await aggregateUpdateUserData();
-          } catch (error) {
-            console.error('Error during initialization:', error);
-          }
-        }
+      // Non-blocking: decay scores in background after screen mounts
+      if (trustedResult && acceptedResult) {
+        applyDecayToAllConfidenceScores().catch(error =>
+          console.error('Error during initialization:', error)
+        );
       }
     };
 
-    checkDeviceTrust();
+    initialize();
   }, []);
 
   const handleAcceptEULA = async () => {
@@ -46,7 +44,6 @@ export default function App() {
       // Run deferred initialization after EULA acceptance
       try {
         await applyDecayToAllConfidenceScores();
-        await aggregateUpdateUserData();
       } catch (error) {
         console.error('Error during initialization:', error);
       }

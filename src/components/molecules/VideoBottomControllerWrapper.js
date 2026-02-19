@@ -11,8 +11,8 @@ const VideoBottomControllerWrapper = () => {
 
   return (
       <View style={video_feed_type === VideoFeedType.VIDEO_FOCUSED_FEED ? styles.videofocusedFeedContainer: styles.videowaudioFeedContainer}>
-          <VideoDescriptionSlide />
           <VideoProgressBar />
+          <VideoDescriptionSlide />
           <VideoSlideController />
       </View>
   );

@@ -26,6 +26,7 @@ import {VideoMetadata} from '../atoms/VideoMetadata';
 import {calculateAndUpdateConfidenceScoreCache, flushConfidenceScores} from "../atoms/confidencescores";
 import TemporaryWarningBanner from "./TemporaryWarningBanner";
 import {getBlockedUsers} from '../atoms/moderation';
+import {aggregateUpdateUserData} from '../atoms/user_functions';
 
 // Track video→feed assignments to prevent cross-feed duplicates
 const globalVideoAssignments = {};
@@ -127,6 +128,7 @@ const VideoProvider = ({children, video_feed_type}) => {
   const [temporaryWarning, setTemporaryWarning] = useState("");
   const [error, setError] = useState("");
   const [reAttemptFetchingFeedInterval, setreAttemptFetchingFeedInterval] = useState(REATTEMPT_FETCHING_FEED_INTERVAL);
+  const hasUploadedUserDataRef = useRef(false);
 
   useEffect(() => { videoMetadatasRef.current = videoMetadatas; }, [videoMetadatas]);
   useEffect(() => { videoIndexExternalViewRef.current = videoIndexExternalView; }, [videoIndexExternalView]);
@@ -233,6 +235,18 @@ const VideoProvider = ({children, video_feed_type}) => {
 
     let videoMetadataBatch = [];
     try {
+      // Upload seen checksums BEFORE fetching, so the server knows what to exclude.
+      // Force-uploads checksums on the first fetch of each session (bypasses interval).
+      if (!hasUploadedUserDataRef.current) {
+        hasUploadedUserDataRef.current = true;
+        try {
+          await aggregateUpdateUserData();
+        } catch (err) {
+          console.error('Pre-fetch user data upload failed:', err.message);
+          hasUploadedUserDataRef.current = false;
+        }
+      }
+
       const fetchFeedWithBackoff = backoff(fetchFeed, 2, 1000, 10000);
       const response = await fetchFeedWithBackoff({
         video_feed_type: video_feed_type,
@@ -245,13 +259,16 @@ const VideoProvider = ({children, video_feed_type}) => {
         return;
       }
       videoMetadataBatch = response.video_feed.map(videoRawMetadata => new VideoMetadata(videoRawMetadata));
+      console.debug(`[${video_feed_type}] Server returned ${videoMetadataBatch.length} videos`);
       videoMetadataBatch = deduplicateAcrossFeeds(videoMetadataBatch, video_feed_type);
+      console.debug(`[${video_feed_type}] After cross-feed dedup: ${videoMetadataBatch.length} videos`);
     } catch (err) {
       console.error("Error fetching videos:", err.message);
       setError(err.message);
     }
 
     let unSeenVideoMetadatasBatch = await filterUnseenAndUnblocked(videoMetadataBatch);
+    console.debug(`[${video_feed_type}] After seen filter: ${unSeenVideoMetadatasBatch.length} / ${videoMetadataBatch.length} videos`);
 
     if (unSeenVideoMetadatasBatch.length === 0) {
       setRefreshing(false);
@@ -272,11 +289,9 @@ const VideoProvider = ({children, video_feed_type}) => {
 
     setRefreshing(false);
 
-    // Fire-and-forget: parallel cache writes don't affect rendered state
-    Promise.all([
-      setVideoMetadatasCache(video_feed_type, videosToCache),
-      updateSeenVideoMetadatasCache(video_feed_type, unSeenVideoMetadatasBatch),
-    ]).catch(err => console.warn('Cache write failed:', err.message));
+    // Fire-and-forget: cache the current feed state (seen tracking moved to onViewableItemsChanged)
+    setVideoMetadatasCache(video_feed_type, videosToCache)
+      .catch(err => console.warn('Cache write failed:', err.message));
   };
 
 
@@ -378,7 +393,7 @@ const VideoProvider = ({children, video_feed_type}) => {
       setPaused(false);
       setLiked(false);
 
-      // Deferred: analytics for previous video + cache write (fire-and-forget)
+      // Deferred: analytics for previous video + mark current as seen (fire-and-forget)
       const currentMetadatas = videoMetadatasRef.current;
       const previousPlayer = videoSlideVideoRefs.current[previousIndex];
       (async () => {
@@ -391,6 +406,10 @@ const VideoProvider = ({children, video_feed_type}) => {
               await calculateAndUpdateConfidenceScoreCache(video_feed_type, currentMetadatas[previousIndex].hashtags,
                   {percentageSeenOfVideo: percentageSeenOfVideo});
             }
+          }
+          // Mark the now-visible video as seen so it won't reappear in future fetches
+          if (currentMetadatas[newIndex]) {
+            await updateSeenVideoMetadatasCache(video_feed_type, [currentMetadatas[newIndex]]);
           }
           await setVideoIndexIdealStateCache(video_feed_type, newIndex);
         } catch (err) {

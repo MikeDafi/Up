@@ -27,7 +27,7 @@ export const SEEN_VIDEO_METADATAS_LIMIT = 1000;
 export const SEEN_VIDEO_IDS_CHECKSUM_UPDATE_TIMESTAMP_KEY = 'seen_video_checksum_ids_update_timestamp';
 
 export const SEEN_VIDEO_IDS_CHECKSUM_UPDATE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-export const SEEN_VIDEO_IDS_CHECKSUM_UPLOAD_SIZE_LIMIT = 100;
+export const SEEN_VIDEO_IDS_CHECKSUM_UPLOAD_SIZE_LIMIT = 1000;
 export const CURRENT_VIDEO_INDEX_KEY = 'current_video_index';
 
 export const CURRENT_VIDEO_PATHS_KEY = 'current_video_paths';

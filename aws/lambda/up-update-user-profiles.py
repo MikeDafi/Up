@@ -112,10 +112,13 @@ def ensure_user_exists(user_profile):
 
 
 def sanitize_dynamodb_map(d):
+    """Remove empty-string keys and convert floats to Decimal for DynamoDB."""
     if isinstance(d, dict):
         return {k: sanitize_dynamodb_map(v) for k, v in d.items() if k.strip()}
     elif isinstance(d, list):
         return [sanitize_dynamodb_map(v) for v in d]
+    elif isinstance(d, float):
+        return Decimal(str(d))
     return d
 
 
@@ -133,7 +136,7 @@ def update_user_profile(user_profile):
         "#algorithm = if_not_exists(#algorithm, :empty_map)"
     )
     expression_attribute_values = {
-        ":prefs": user_profile.preferences,
+        ":prefs": sanitize_dynamodb_map(user_profile.preferences),
         ":last_login": user_profile.last_login or datetime.utcnow().isoformat(),
         ":empty_map": {},
     }

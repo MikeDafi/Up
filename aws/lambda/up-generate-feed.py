@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 dynamodb = boto3.resource('dynamodb')
-hashtag_table = dynamodb.Table('up-hashtag')
+hashtag_table = dynamodb.Table('up-hashtag-videos')
 hashtag_registry_table = dynamodb.Table('up-hashtag-registry')
 user_profiles_table = dynamodb.Table('up-user-profiles')
 
@@ -22,7 +22,7 @@ ACTIVE_USER_WINDOW_DAYS = 7  # Only batch-generate feeds for users active within
 
 _hashtag_cache = {"hashtags": None, "expires_at": 0}
 
-debug_mode = False  # Set to False to disable debug logs
+debug_mode = True  # Set to False to disable debug logs
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
@@ -79,10 +79,14 @@ def get_video_metadatas(video_ids):
                 video_metadata.append(result)
 
     # Legacy videos without compressionStatus are treated as ready
+    pre_filter_count = len(video_metadata)
     video_metadata = [
         item for item in video_metadata
         if item.get('compressionStatus', 'READY') == 'READY'
     ]
+    if pre_filter_count != len(video_metadata):
+        logger.debug(f"compressionStatus filter: {pre_filter_count} -> {len(video_metadata)} "
+                     f"(dropped {pre_filter_count - len(video_metadata)} non-READY videos)")
 
     for item in video_metadata:
         item.pop('compressionStatus', None)
@@ -135,21 +139,41 @@ def get_video_ids_for_video_generation(user_id: str, user_feed_hashtags_ordered:
         ]
 
         if not available_videos:
+            logger.debug(f"No available videos for hashtag {hashtag} after filtering "
+                         f"(used={len(used_video_ids)}, seen_checksums={len(seen_video_ids_checksums)})")
             continue
 
+        logger.debug(f"Available videos for {hashtag}: {len(available_videos)}")
+
+        # Weighted sampling WITHOUT replacement to avoid wasting feed slots on duplicates
+        num_needed = len(hashtag_to_feed_index[hashtag])
+        k = min(len(available_videos), num_needed)
+
         available_set = set(available_videos)
-        chosen_videos = random.choices(
-            population=available_videos,
-            weights=[max(float(item['popularity']), 1e-6) for item in items if item['videoId'] in available_set],
-            k=min(len(available_videos), len(hashtag_to_feed_index[hashtag]))
-        )
+        weights = [max(float(item['popularity']), 1e-6) for item in items if item['videoId'] in available_set]
+
+        if k == len(available_videos):
+            # Need all of them — just shuffle by weight (take all, ordered by weighted sample)
+            chosen_videos = available_videos.copy()
+            random.shuffle(chosen_videos)
+        else:
+            # Weighted sample without replacement
+            chosen_videos = []
+            remaining = list(zip(available_videos, weights))
+            for _ in range(k):
+                pop, wts = zip(*remaining)
+                pick = random.choices(pop, weights=wts, k=1)[0]
+                chosen_videos.append(pick)
+                remaining = [(v, w) for v, w in remaining if v != pick]
 
         for i, index in enumerate(hashtag_to_feed_index[hashtag]):
             if i < len(chosen_videos):
                 feed[index] = chosen_videos[i]
                 used_video_ids.add(chosen_videos[i])
 
-    return [video for video in feed if video is not None]
+    filled = [video for video in feed if video is not None]
+    logger.debug(f"Feed slots filled: {len(filled)} / {len(feed)}")
+    return filled
 
 
 def get_hashtags_for_video_generation(hashtags, confidence_scores, limit) -> list[str]:
@@ -198,11 +222,38 @@ def fetch_user_profile(user_id, retries=3, delay=10):
     return None
 
 def fetch_all_hashtags():
-    """Scan up-hashtag-registry (not up-hashtag) for distinct tags. Cached 7 days."""
+    """
+    Return all known hashtags, reconciling the registry with the source-of-truth
+    up-hashtag-videos table.  Ensures legacy videos (uploaded before the registry
+    existed) are always discoverable.
+    """
     now = time.time()
     if _hashtag_cache["hashtags"] is not None and now < _hashtag_cache["expires_at"]:
         return _hashtag_cache["hashtags"]
 
+    # 1) Read the registry
+    registry_hashtags = set(_scan_hashtag_registry())
+
+    # 2) Read the canonical set from up-hashtag-videos
+    source_hashtags = set(_scan_hashtag_table_distinct())
+
+    # 3) Backfill any hashtags present in up-hashtag-videos but missing from the registry
+    missing = source_hashtags - registry_hashtags
+    if missing:
+        logger.info(f"Backfilling {len(missing)} hashtags into registry "
+                    f"(registry={len(registry_hashtags)}, source={len(source_hashtags)})")
+        _backfill_registry(missing)
+
+    # Use the union — covers both sources in case of partial failures
+    hashtags = list(source_hashtags | registry_hashtags)
+
+    logger.debug(f"fetch_all_hashtags: {len(hashtags)} hashtags available")
+    _hashtag_cache["hashtags"] = hashtags
+    _hashtag_cache["expires_at"] = now + HASHTAG_CACHE_TTL_SECONDS
+    return hashtags
+
+
+def _scan_hashtag_registry():
     hashtags = []
     response = hashtag_registry_table.scan(ProjectionExpression='hashtag')
     hashtags.extend(item['hashtag'] for item in response.get('Items', []))
@@ -212,16 +263,53 @@ def fetch_all_hashtags():
             ExclusiveStartKey=response['LastEvaluatedKey']
         )
         hashtags.extend(item['hashtag'] for item in response.get('Items', []))
-
-    _hashtag_cache["hashtags"] = hashtags
-    _hashtag_cache["expires_at"] = now + HASHTAG_CACHE_TTL_SECONDS
     return hashtags
+
+
+def _scan_hashtag_table_distinct():
+    """Scan up-hashtag-videos for distinct partition keys (hashtag names). More expensive but comprehensive."""
+    seen = set()
+    response = hashtag_table.scan(ProjectionExpression='hashtag')
+    for item in response.get('Items', []):
+        seen.add(item['hashtag'])
+    while 'LastEvaluatedKey' in response:
+        response = hashtag_table.scan(
+            ProjectionExpression='hashtag',
+            ExclusiveStartKey=response['LastEvaluatedKey']
+        )
+        for item in response.get('Items', []):
+            seen.add(item['hashtag'])
+    return list(seen)
+
+
+def _backfill_registry(hashtags):
+    """Write missing hashtags into up-hashtag-registry via batch writes."""
+    batch = []
+    for tag in hashtags:
+        batch.append({"PutRequest": {"Item": {"hashtag": {"S": tag}}}})
+        if len(batch) == 25:  # DynamoDB batch_write_item limit
+            _flush_registry_batch(batch)
+            batch = []
+    if batch:
+        _flush_registry_batch(batch)
+
+
+def _flush_registry_batch(batch):
+    try:
+        dynamodb_client = boto3.client('dynamodb')
+        dynamodb_client.batch_write_item(
+            RequestItems={'up-hashtag-registry': batch}
+        )
+    except Exception as e:
+        logger.error(f"Failed to batch-backfill registry ({len(batch)} items): {e}")
 
 def should_generate_new_feed(last_updated_feed):
     if not last_updated_feed:
         return True
-    last_updated_feed = datetime.fromisoformat(last_updated_feed)
-    return (datetime.utcnow() - last_updated_feed) >= timedelta(seconds=5)  # TODO: restore to minutes=5 after testing
+    dt = datetime.fromisoformat(last_updated_feed.replace('Z', '+00:00'))
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    return (datetime.utcnow() - dt) >= timedelta(minutes=1)
 
 def update_user_feed(user_id, video_feed):
     """Writes last_batch_feed_update (not last_updated_feed) to avoid throttling individual requests."""
@@ -273,6 +361,9 @@ def process_individual_user(user_id, video_feed_type, limit):
     seen_checksums = extract_seen_checksums(user_profile)
     hashtags = fetch_all_hashtags()
 
+    logger.debug(f"Registry hashtags: {len(hashtags)}, confidence scores: {len(hashtag_to_confidence)}, "
+                 f"seen checksums: {len(seen_checksums)}, limit: {limit}")
+
     if not hashtags:
         logger.warning(f"No hashtags retrieved for user {user_id}.")
 
@@ -290,7 +381,9 @@ def _is_recently_active(user, window_days=ACTIVE_USER_WINDOW_DAYS):
     if not last_login:
         return False
     try:
-        login_dt = datetime.fromisoformat(last_login)
+        login_dt = datetime.fromisoformat(last_login.replace('Z', '+00:00'))
+        if login_dt.tzinfo is not None:
+            login_dt = login_dt.replace(tzinfo=None)
         return (datetime.utcnow() - login_dt) < timedelta(days=window_days)
     except (ValueError, TypeError):
         return False

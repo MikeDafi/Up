@@ -9,7 +9,7 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 metadata_table = dynamodb.Table('up-videometadata')
-hashtag_table = dynamodb.Table('up-hashtag')
+hashtag_table = dynamodb.Table('up-hashtag-videos')
 hashtag_registry_table = dynamodb.Table('up-hashtag-registry')
 rate_limit_table = dynamodb.Table('up-rate-limits')
 
@@ -33,7 +33,7 @@ def save_metadata(item):
 def flatten_and_publish_hashtags(video_id, hashtags):
     """
     Flatten hashtags and publish each hashtag with the associated video info
-    to the up-hashtag table. Also registers each distinct hashtag in the
+    to the up-hashtag-videos table. Also registers each distinct hashtag in the
     up-hashtag-registry table so feed generation can avoid full table scans.
     """
     for hashtag in hashtags:
