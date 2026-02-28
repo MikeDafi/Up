@@ -17,7 +17,9 @@ import boto3
 # Configuration
 # ---------------------------------------------------------------------------
 
-JWT_SECRET = os.environ.get('JWT_SECRET', '')
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET and not os.environ.get('BYPASS_ATTESTATION', 'false').lower() == 'true':
+    raise RuntimeError("JWT_SECRET environment variable must be set when attestation is enabled")
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRY_SECONDS = 3600  # 1 hour
 

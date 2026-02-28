@@ -70,8 +70,13 @@ def lambda_handler(event, context):
     try:
         # Enforce IP-based rate limit before writing to DynamoDB
         source_ip = _get_source_ip(event)
-        if source_ip:
-            _check_ip_rate_limit(source_ip)
+        if not source_ip:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Unable to determine client IP'}),
+            }
+        _check_ip_rate_limit(source_ip)
 
         nonce = secrets.token_urlsafe(32)  # 32 bytes of cryptographic randomness
         ttl = int(time.time()) + NONCE_TTL_SECONDS

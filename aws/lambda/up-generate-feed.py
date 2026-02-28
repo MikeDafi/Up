@@ -1,7 +1,7 @@
 import json
 import boto3
 from boto3.dynamodb.conditions import Key
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import random
 import time
@@ -10,8 +10,9 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
+cu# Initialize the DynamoDB client
 dynamodb = boto3.resource('dynamodb')
-hashtag_table = dynamodb.Table('up-hashtag-videos')
+hashtag_table = dynamodb.Table('up-hashtag')
 hashtag_registry_table = dynamodb.Table('up-hashtag-registry')
 user_profiles_table = dynamodb.Table('up-user-profiles')
 
@@ -22,13 +23,16 @@ ACTIVE_USER_WINDOW_DAYS = 7  # Only batch-generate feeds for users active within
 
 _hashtag_cache = {"hashtags": None, "expires_at": 0}
 
-debug_mode = True  # Set to False to disable debug logs
+debug_mode = False  # Set to False to disable debug logs
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
 
 def generate_video_feed(user_id, hashtags, confidence_scores, limit, seen_checksums=None):
-    """Generate a ranked video feed, preserving the hashtag slot ordering."""
+    """
+    Generate a video feed using hashtags, querying the up-hashtag table's default hashtag-timestamp index.
+    Maintain the order of user_feed_hashtags_ordered and place video_ids into the identical index as seen in user_feed_hashtags_ordered.
+    """
     if seen_checksums is None:
         seen_checksums = set()
     logger.debug(f"Generating video feed for hashtags: {hashtags}")
@@ -40,14 +44,16 @@ def generate_video_feed(user_id, hashtags, confidence_scores, limit, seen_checks
     logger.debug(f"Generated video feed: {video_metadatas}")
     return video_metadatas
 
+# Only fetch the fields the client actually uses + compressionStatus for server-side filtering
 _VIDEO_METADATA_FIELDS = 'videoId, description, hashtags, muteByDefault, uploadedAt, city, #r, country, compressionStatus'
-_VIDEO_METADATA_EXPR_NAMES = {'#r': 'region'}  # reserved word
+_VIDEO_METADATA_EXPR_NAMES = {'#r': 'region'}  # 'region' is a DynamoDB reserved word
 _VIDEOID_GSI = 'videoId-uploadedAt-index'
 
 videometadata_table = dynamodb.Table('up-videometadata')
 
 
 def _query_video_metadata(video_id: str):
+    """Query the videoId GSI for a single video's metadata. Designed for parallel execution."""
     try:
         response = videometadata_table.query(
             IndexName=_VIDEOID_GSI,
@@ -64,13 +70,19 @@ def _query_video_metadata(video_id: str):
 
 
 def get_video_metadatas(video_ids):
-    """Resolve metadata via videoId GSI in parallel, filter by compressionStatus."""
+    """
+    Fetch metadata for a list of video_ids from the up-videometadata table.
+    The table's primary key is region+uploadedAt, so we query the videoId-uploadedAt GSI
+    in parallel to resolve each video's metadata.
+    Uses ProjectionExpression to fetch only the fields the client needs.
+    """
     if not video_ids:
         return []
 
     logger.debug(f"Fetching metadata for {len(video_ids)} video IDs via GSI queries")
     video_metadata = []
 
+    # Query the GSI in parallel — one query per videoId
     with ThreadPoolExecutor(max_workers=min(len(video_ids), 10)) as executor:
         futures = {executor.submit(_query_video_metadata, vid): vid for vid in video_ids}
         for future in as_completed(futures):
@@ -78,23 +90,23 @@ def get_video_metadatas(video_ids):
             if result is not None:
                 video_metadata.append(result)
 
-    # Legacy videos without compressionStatus are treated as ready
-    pre_filter_count = len(video_metadata)
+    # Filter out videos that are not ready for playback.
+    # Legacy videos without compressionStatus are treated as ready (backward compatible).
     video_metadata = [
         item for item in video_metadata
         if item.get('compressionStatus', 'READY') == 'READY'
     ]
-    if pre_filter_count != len(video_metadata):
-        logger.debug(f"compressionStatus filter: {pre_filter_count} -> {len(video_metadata)} "
-                     f"(dropped {pre_filter_count - len(video_metadata)} non-READY videos)")
 
+    # Strip compressionStatus before returning — client doesn't need it
     for item in video_metadata:
         item.pop('compressionStatus', None)
 
+    # Preserve the original ordering of video_ids
     metadata_by_id = {item['videoId']: item for item in video_metadata}
     return [metadata_by_id[vid] for vid in video_ids if vid in metadata_by_id]
 
 def _query_hashtag(hashtag: str):
+    """Query DynamoDB for a single hashtag. Designed for parallel execution."""
     try:
         response = hashtag_table.query(
             KeyConditionExpression=boto3.dynamodb.conditions.Key('hashtag').eq(hashtag),
@@ -108,16 +120,18 @@ def _query_hashtag(hashtag: str):
 
 
 def get_video_ids_for_video_generation(user_id: str, user_feed_hashtags_ordered: list[str], seen_video_ids_checksums: set) -> list[str]:
+    """ Use the hashtags for video feed to get the video ids for the feed, excluding seen videos. """
     unique_hashtags = list(set(user_feed_hashtags_ordered))
-    feed = [None] * len(user_feed_hashtags_ordered)
+    feed = [None] * len(user_feed_hashtags_ordered)  # Pre-allocate the feed list
 
     hashtag_to_feed_index = {hashtag: [] for hashtag in unique_hashtags}
     for idx, hashtag in enumerate(user_feed_hashtags_ordered):
         hashtag_to_feed_index[hashtag].append(idx)
 
-    used_video_ids = set()
+    used_video_ids = set()  # Track used video IDs to prevent duplicates
     logger.debug(f"Excluding {len(seen_video_ids_checksums)} seen video checksums")
 
+    # Fire all hashtag queries in parallel — reduces N sequential round-trips to 1 wall-clock round-trip
     hashtag_items = {}
     with ThreadPoolExecutor(max_workers=min(len(unique_hashtags), 10)) as executor:
         futures = {executor.submit(_query_hashtag, ht): ht for ht in unique_hashtags}
@@ -133,65 +147,70 @@ def get_video_ids_for_video_generation(user_id: str, user_feed_hashtags_ordered:
 
         logger.debug(f"Retrieved {len(items)} items for hashtag {hashtag}")
 
+        # Filter out videos already seen or used
         available_videos = [
             item['videoId'] for item in items
             if item['videoId'] not in used_video_ids and item['videoId'][:8] not in seen_video_ids_checksums
         ]
 
         if not available_videos:
-            logger.debug(f"No available videos for hashtag {hashtag} after filtering "
-                         f"(used={len(used_video_ids)}, seen_checksums={len(seen_video_ids_checksums)})")
             continue
 
-        logger.debug(f"Available videos for {hashtag}: {len(available_videos)}")
-
-        # Weighted sampling WITHOUT replacement to avoid wasting feed slots on duplicates
-        num_needed = len(hashtag_to_feed_index[hashtag])
-        k = min(len(available_videos), num_needed)
-
         available_set = set(available_videos)
-        weights = [max(float(item['popularity']), 1e-6) for item in items if item['videoId'] in available_set]
-
-        if k == len(available_videos):
-            # Need all of them — just shuffle by weight (take all, ordered by weighted sample)
-            chosen_videos = available_videos.copy()
-            random.shuffle(chosen_videos)
-        else:
-            # Weighted sample without replacement
-            chosen_videos = []
-            remaining = list(zip(available_videos, weights))
-            for _ in range(k):
-                pop, wts = zip(*remaining)
-                pick = random.choices(pop, weights=wts, k=1)[0]
-                chosen_videos.append(pick)
-                remaining = [(v, w) for v, w in remaining if v != pick]
+        chosen_videos = random.choices(
+            population=available_videos,
+            weights=[max(float(item['popularity']), 1e-6) for item in items if item['videoId'] in available_set],
+            k=min(len(available_videos), len(hashtag_to_feed_index[hashtag]))
+        )
 
         for i, index in enumerate(hashtag_to_feed_index[hashtag]):
             if i < len(chosen_videos):
                 feed[index] = chosen_videos[i]
                 used_video_ids.add(chosen_videos[i])
 
-    filled = [video for video in feed if video is not None]
-    logger.debug(f"Feed slots filled: {len(filled)} / {len(feed)}")
-    return filled
+    return [video for video in feed if video is not None]
+
+
+def fetch_exploratory_videos(count, scan_limit):
+    """Fetch exploratory videos from trending or random sources, ensuring uniqueness."""
+    try:
+        response = hashtag_table.scan(Limit=scan_limit)  # Scan for trending/random videos
+        videos = [item['videoId'] for item in response.get('Items', []) ]
+
+        # Ensure we select unique exploratory videos
+        return random.sample(videos, min(count, len(videos)))
+    except Exception as e:
+        logger.error(f"Error fetching exploratory videos: {e}")
+        return []
 
 
 def get_hashtags_for_video_generation(hashtags, confidence_scores, limit) -> list[str]:
-    """Weighted sampling: exploit confident tags, explore trending + random."""
+    """
+    Generate a user's video feed using hashtags and confidence scores.
+    Implements exploration, exploitation, and TikTok-like ranking.
+    If hashtags are missing, trending tags are used instead.
+    """
     confident_tags = {tag: confidence_scores[tag] for tag in confidence_scores if tag in hashtags}
     missing_tags = [tag for tag in confidence_scores if tag not in hashtags]
 
-    trending_tags = random.sample(hashtags, min(len(hashtags), 5))  # TODO: real trending source
+    # Fetch trending hashtags (stubbed logic for now, implement as needed)
+    trending_tags = random.sample(hashtags, min(len(hashtags), 5))
 
+    # Replace missing tags with trending tags
     for missing_tag in missing_tags:
         if trending_tags:
             replacement_tag = random.choice(trending_tags)
+            # Convert Decimal to float before multiplication
             confident_tags[replacement_tag] = confident_tags.get(replacement_tag, Decimal(0)) + Decimal(confidence_scores[missing_tag]) * Decimal('0.8')
 
+    # Add exploratory tags with low initial confidence
     exploratory_tags = [tag for tag in hashtags if tag not in confident_tags]
     exploratory_scores = {tag: Decimal(random.uniform(0.1, 0.3)) for tag in exploratory_tags}
+
+    # Assign scores to trending tags that were not used
     trending_scores = {tag: Decimal(random.uniform(0.3, 0.5)) for tag in trending_tags if tag not in confident_tags}
 
+    # Combine and normalize scores
     combined_scores = {**confident_tags, **exploratory_scores, **trending_scores}
     max_score = max(combined_scores.values(), default=Decimal(1))
     combined_scores = {tag: score / max_score for tag, score in combined_scores.items()}
@@ -199,6 +218,7 @@ def get_hashtags_for_video_generation(hashtags, confidence_scores, limit) -> lis
     if not combined_scores:
         return []
 
+    # Create a feed with weighted random sampling
     feed = random.choices(
         population=list(combined_scores.keys()),
         weights=[float(score) for score in combined_scores.values()],
@@ -209,51 +229,22 @@ def get_hashtags_for_video_generation(hashtags, confidence_scores, limit) -> lis
 
     return feed
 
-def fetch_user_profile(user_id, retries=3, delay=10):
-    for attempt in range(retries):
-        response = user_profiles_table.get_item(Key={'user_id': user_id})
-        user_profile = response.get('Item')
-
-        if user_profile:
-            return user_profile
-
-        time.sleep(delay)
-
-    return None
+def fetch_user_profile(user_id):
+    """Retrieve the user profile from DynamoDB."""
+    response = user_profiles_table.get_item(Key={'user_id': user_id})
+    return response.get('Item')
 
 def fetch_all_hashtags():
     """
-    Return all known hashtags, reconciling the registry with the source-of-truth
-    up-hashtag-videos table.  Ensures legacy videos (uploaded before the registry
-    existed) are always discoverable.
+    Retrieve the list of distinct hashtags from the up-hashtag-registry table.
+    This registry has one item per unique hashtag, so the scan is small and cheap
+    compared to scanning the full up-hashtag table (which has one row per hashtag-video pair).
+    Uses a module-level cache with 7-day TTL to further reduce reads.
     """
     now = time.time()
     if _hashtag_cache["hashtags"] is not None and now < _hashtag_cache["expires_at"]:
         return _hashtag_cache["hashtags"]
 
-    # 1) Read the registry
-    registry_hashtags = set(_scan_hashtag_registry())
-
-    # 2) Read the canonical set from up-hashtag-videos
-    source_hashtags = set(_scan_hashtag_table_distinct())
-
-    # 3) Backfill any hashtags present in up-hashtag-videos but missing from the registry
-    missing = source_hashtags - registry_hashtags
-    if missing:
-        logger.info(f"Backfilling {len(missing)} hashtags into registry "
-                    f"(registry={len(registry_hashtags)}, source={len(source_hashtags)})")
-        _backfill_registry(missing)
-
-    # Use the union — covers both sources in case of partial failures
-    hashtags = list(source_hashtags | registry_hashtags)
-
-    logger.debug(f"fetch_all_hashtags: {len(hashtags)} hashtags available")
-    _hashtag_cache["hashtags"] = hashtags
-    _hashtag_cache["expires_at"] = now + HASHTAG_CACHE_TTL_SECONDS
-    return hashtags
-
-
-def _scan_hashtag_registry():
     hashtags = []
     response = hashtag_registry_table.scan(ProjectionExpression='hashtag')
     hashtags.extend(item['hashtag'] for item in response.get('Items', []))
@@ -263,63 +254,35 @@ def _scan_hashtag_registry():
             ExclusiveStartKey=response['LastEvaluatedKey']
         )
         hashtags.extend(item['hashtag'] for item in response.get('Items', []))
+
+    _hashtag_cache["hashtags"] = hashtags
+    _hashtag_cache["expires_at"] = now + HASHTAG_CACHE_TTL_SECONDS
     return hashtags
 
-
-def _scan_hashtag_table_distinct():
-    """Scan up-hashtag-videos for distinct partition keys (hashtag names). More expensive but comprehensive."""
-    seen = set()
-    response = hashtag_table.scan(ProjectionExpression='hashtag')
-    for item in response.get('Items', []):
-        seen.add(item['hashtag'])
-    while 'LastEvaluatedKey' in response:
-        response = hashtag_table.scan(
-            ProjectionExpression='hashtag',
-            ExclusiveStartKey=response['LastEvaluatedKey']
-        )
-        for item in response.get('Items', []):
-            seen.add(item['hashtag'])
-    return list(seen)
-
-
-def _backfill_registry(hashtags):
-    """Write missing hashtags into up-hashtag-registry via batch writes."""
-    batch = []
-    for tag in hashtags:
-        batch.append({"PutRequest": {"Item": {"hashtag": {"S": tag}}}})
-        if len(batch) == 25:  # DynamoDB batch_write_item limit
-            _flush_registry_batch(batch)
-            batch = []
-    if batch:
-        _flush_registry_batch(batch)
-
-
-def _flush_registry_batch(batch):
-    try:
-        dynamodb_client = boto3.client('dynamodb')
-        dynamodb_client.batch_write_item(
-            RequestItems={'up-hashtag-registry': batch}
-        )
-    except Exception as e:
-        logger.error(f"Failed to batch-backfill registry ({len(batch)} items): {e}")
-
 def should_generate_new_feed(last_updated_feed):
-    if not last_updated_feed:
+    """
+    Determine if a new feed should be generated based on the last update time.
+    """
+    if not last_updated_feed: # Probably a new account to not have last_updated_feed
         return True
-    dt = datetime.fromisoformat(last_updated_feed.replace('Z', '+00:00'))
-    if dt.tzinfo is not None:
-        dt = dt.replace(tzinfo=None)
-    return (datetime.utcnow() - dt) >= timedelta(minutes=1)
+    last_updated_feed = datetime.fromisoformat(last_updated_feed)
+    if last_updated_feed.tzinfo is None:
+        last_updated_feed = last_updated_feed.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - last_updated_feed) >= timedelta(minutes=2)
 
 def update_user_feed(user_id, video_feed):
-    """Writes last_batch_feed_update (not last_updated_feed) to avoid throttling individual requests."""
+    """
+    Update the user's pre-generated video feed in DynamoDB.
+    Uses last_batch_feed_update (not last_updated_feed) so batch jobs
+    don't interfere with the individual request rate limit.
+    """
     try:
         user_profiles_table.update_item(
             Key={'user_id': user_id},
             UpdateExpression="SET video_feed = :video_feed, last_batch_feed_update = :last_batch_feed_update",
             ExpressionAttributeValues={
                 ':video_feed': video_feed,
-                ':last_batch_feed_update': datetime.utcnow().isoformat()
+                ':last_batch_feed_update': datetime.now(timezone.utc).isoformat()
             }
         )
     except Exception as e:
@@ -327,70 +290,83 @@ def update_user_feed(user_id, video_feed):
         raise
 
 
-def update_individual_feed_timestamp(user_id, video_feed_type):
+def update_individual_feed_timestamp(user_id):
+    """
+    Record that an individual feed was just generated for this user.
+    Uses last_updated_feed — separate from the batch timestamp.
+    """
     try:
         user_profiles_table.update_item(
             Key={'user_id': user_id},
-            UpdateExpression="SET #ts_key = :ts",
-            ExpressionAttributeNames={
-                '#ts_key': f'last_updated_feed_{video_feed_type}'
-            },
+            UpdateExpression="SET last_updated_feed = :ts",
             ExpressionAttributeValues={
-                ':ts': datetime.utcnow().isoformat()
+                ':ts': datetime.now(timezone.utc).isoformat()
             }
         )
     except Exception as e:
         logger.error(f"Error updating individual feed timestamp for {user_id}: {e}")
 
 def extract_seen_checksums(user_profile: dict) -> set:
+    """Extract seen video ID checksums from an already-fetched user profile."""
     return set(
         user_profile.get('preferences', {}).get('seen_video_ids_checksum', [])
     )
 
 def process_individual_user(user_id, video_feed_type, limit):
-    """Rate-limited per feed type (batch uses last_batch_feed_update)."""
+    """
+    Process an individual user's request for a video feed.
+    Rate-limited by last_updated_feed (individual requests only — batch uses a separate timestamp).
+    """
     user_profile = fetch_user_profile(user_id)
     if not user_profile:
         raise Exception(f"User profile not found for user_id {user_id}")
     
-    feed_timestamp_key = f'last_updated_feed_{video_feed_type}'
-    if not should_generate_new_feed(user_profile.get(feed_timestamp_key)):
+    if not should_generate_new_feed(user_profile.get('last_updated_feed')):
         raise Exception(f"{TOO_MANY_REQUESTS_ERROR} for user_id {user_id}, please wait a couple minutes")
 
+    # Get the user's hashtag to confidence scores from algorithm.<feed_type>
     hashtag_to_confidence = user_profile.get('algorithm', {}).get(video_feed_type, {}).get('hashtag_to_confidence_scores', {})
-    seen_checksums = extract_seen_checksums(user_profile)
-    hashtags = fetch_all_hashtags()
 
-    logger.debug(f"Registry hashtags: {len(hashtags)}, confidence scores: {len(hashtag_to_confidence)}, "
-                 f"seen checksums: {len(seen_checksums)}, limit: {limit}")
+    # Extract seen checksums from the profile we already fetched (avoids redundant DynamoDB read)
+    seen_checksums = extract_seen_checksums(user_profile)
+
+    # Fetch the list of hashtags from up-hashtag
+    hashtags = fetch_all_hashtags()
 
     if not hashtags:
         logger.warning(f"No hashtags retrieved for user {user_id}.")
 
+    # Generate the user's video feed
     video_feed = generate_video_feed(user_id, hashtags, hashtag_to_confidence, limit, seen_checksums)
 
     if not video_feed:
         logger.warning(f"No video feed generated for user {user_id}. {video_feed}")
 
-    update_individual_feed_timestamp(user_id, video_feed_type)
+    # Record the individual rate-limit timestamp so subsequent requests within 5 min are throttled
+    update_individual_feed_timestamp(user_id)
 
     return video_feed
 
 def _is_recently_active(user, window_days=ACTIVE_USER_WINDOW_DAYS):
+    """Check if the user has logged in within the given window."""
     last_login = user.get('preferences', {}).get('last_login')
     if not last_login:
         return False
     try:
-        login_dt = datetime.fromisoformat(last_login.replace('Z', '+00:00'))
-        if login_dt.tzinfo is not None:
-            login_dt = login_dt.replace(tzinfo=None)
-        return (datetime.utcnow() - login_dt) < timedelta(days=window_days)
+        login_dt = datetime.fromisoformat(last_login)
+        if login_dt.tzinfo is None:
+            login_dt = login_dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - login_dt) < timedelta(days=window_days)
     except (ValueError, TypeError):
         return False
 
 
 def process_all_users():
-    """Batch pre-generate feeds for users active in the last ACTIVE_USER_WINDOW_DAYS days."""
+    """
+    Pre-generate and store video feeds for recently active users.
+    Only processes users who logged in within the last ACTIVE_USER_WINDOW_DAYS days.
+    Uses last_batch_feed_update for its own rate limit — separate from the individual request timestamp.
+    """
     response = user_profiles_table.scan(Limit=50)
     users = response.get('Items', [])
 
@@ -398,25 +374,37 @@ def process_all_users():
         for user in users:
             user_id = user['user_id']
 
+            # Skip users who haven't opened the app recently
             if not _is_recently_active(user):
                 continue
 
+            # Skip users whose batch feed was already updated within 5 minutes
             if not should_generate_new_feed(user.get('last_batch_feed_update')):
                 continue
 
+            # Merge confidence scores from both feed types for a combined batch feed
             algorithm = user.get('algorithm', {})
             focused_scores = algorithm.get('VIDEO_FOCUSED_FEED', {}).get('hashtag_to_confidence_scores', {})
             audio_scores = algorithm.get('VIDEO_AUDIO_FEED', {}).get('hashtag_to_confidence_scores', {})
             hashtag_to_confidence = {**focused_scores, **audio_scores}
+            # Where both feeds have a score for the same hashtag, take the higher one
             for tag in focused_scores:
                 if tag in audio_scores:
                     hashtag_to_confidence[tag] = max(focused_scores[tag], audio_scores[tag])
 
+            # Extract seen checksums from the already-fetched user profile
             seen_checksums = extract_seen_checksums(user)
+
+            # Fetch the list of hashtags from up-hashtag
             hashtags = fetch_all_hashtags()
+
+            # Generate the user's video feed
             video_feed = generate_video_feed(user_id, hashtags, hashtag_to_confidence, HARD_FEED_LIMIT, seen_checksums)
+
+            # Update the user's feed in the user profiles table (writes last_batch_feed_update, NOT last_updated_feed)
             update_user_feed(user_id, video_feed)
 
+        # Check if there are more users to process
         if 'LastEvaluatedKey' not in response:
             break
 
@@ -424,6 +412,10 @@ def process_all_users():
         users = response.get('Items', [])
 
 def get_params_invalid_reason(user_id, video_feed_type, limit):
+    """
+    Validate the parameters for the Lambda function.
+    Returns a string describing the first invalid parameter, or None if all are valid.
+    """
     if not user_id or not isinstance(user_id, str):
         return "Invalid user_id, must be a string"
     if not video_feed_type or not isinstance(video_feed_type, str) or video_feed_type not in ["VIDEO_AUDIO_FEED", "VIDEO_FOCUSED_FEED"]:
@@ -434,13 +426,17 @@ def get_params_invalid_reason(user_id, video_feed_type, limit):
 
 def lambda_handler(event, context):
     try:
+        # Check if the invocation is via HTTP by inspecting the 'http' key
         if 'http' in event["requestContext"]:
+            # Verify request comes from a legitimate app install
             from attestation_verifier import verify_request, enforce_user_binding
             attestation_result = verify_request(event)
 
+            # Parse the request body
             body = json.loads(event.get('body', '{}'))
             user_id = body.get('user_id')
 
+            # IDOR protection: ensure this device is bound to this user_id
             enforce_user_binding(attestation_result.get('device_id'), user_id)
             video_feed_type = body.get('video_feed_type')
             limit = body.get('limit', HARD_FEED_LIMIT)
@@ -459,9 +455,10 @@ def lambda_handler(event, context):
 
             return {
                 "statusCode": 200,
-                "body": json.dumps(response_body, default=str)
+                "body": json.dumps(response_body)
             }
         else:
+            # Handle non-HTTP invocations
             process_all_users()
             return {
                 "statusCode": 200,
@@ -474,6 +471,7 @@ def lambda_handler(event, context):
             "body": json.dumps({"message": str(pe)})
         }
     except Exception as e:
+        # Log full error details server-side only
         traceback.print_exc()
         if TOO_MANY_REQUESTS_ERROR in str(e):
             return {
