@@ -26,6 +26,7 @@ from playwright.async_api import async_playwright
 STORAGE_FILE = Path(__file__).parent / "video_ids.txt"
 BROWSER_STATE_DIR = Path(__file__).parent / "browser_state"
 DOWNLOAD_DIR = Path(__file__).parent / "videos_downloads"
+MAX_VIDEO_DURATION_SECONDS = 180  # 3 minutes
 
 def create_directory(path):
     if not os.path.exists(path):
@@ -119,6 +120,21 @@ def wait_for_download(video_id, timeout=20):
     click.echo(f"     💡 Make sure Chrome downloads to: {DOWNLOAD_DIR.absolute()}")
     
     raise FileNotFoundError(f"Download failed: {expected_path} not found after {timeout} seconds.")
+
+def get_video_duration(file_path):
+    """Return video duration in seconds using ffprobe."""
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "csv=p=0",
+        file_path,
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        return float(result.stdout.strip())
+    except (ValueError, TypeError):
+        return None
 
 def crop_video(file_path):
     cmd = [
@@ -966,6 +982,15 @@ async def download_videos(category, limit, id, undownloaded_only, headless):
             
             try:
                 file_path = await download_video_playwright(page, vid_id)
+
+                # Check duration after download — skip videos longer than max
+                duration = get_video_duration(str(file_path))
+                if duration is not None and duration > MAX_VIDEO_DURATION_SECONDS:
+                    click.echo(click.style(f"  ⏭️  Skipping (duration {duration:.0f}s exceeds {MAX_VIDEO_DURATION_SECONDS}s max)", fg='yellow'))
+                    Path(file_path).unlink(missing_ok=True)
+                    click.echo(f"  🗑️  Deleted oversized video")
+                    continue
+
                 mark_as_downloaded(vid_id)
                 
                 success_count += 1
@@ -1049,6 +1074,14 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
                 click.echo(f"  💡 Run 'videos download -i {vid_id}' first")
                 failed_count += 1
                 continue
+
+            duration = get_video_duration(str(file_path))
+            if duration is not None and duration > MAX_VIDEO_DURATION_SECONDS:
+                click.echo(click.style(f"  ⏭️  Skipping (duration {duration:.0f}s exceeds {MAX_VIDEO_DURATION_SECONDS}s max)", fg='yellow'))
+                if cleanup:
+                    file_path.unlink(missing_ok=True)
+                    click.echo(f"  🗑️  Cleaned up oversized file")
+                continue
             
             description = data.get('description', '')
             if not description:
@@ -1060,7 +1093,7 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
             if not hashtags:
                 category = data.get('category', '').lower()
                 hashtags = [category] if category else []
-            hashtags = hashtags[:20]
+            hashtags = [h[:15] for h in hashtags[:20]]
             click.echo(f"  🏷️  Hashtags: {hashtags}")
             video_id, s3_base_url = submit_media(str(file_path), description, hashtags, mute_by_default)
             

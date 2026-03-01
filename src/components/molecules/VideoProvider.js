@@ -176,6 +176,11 @@ const VideoProvider = ({children, video_feed_type}) => {
       getBlockedUsers(),
     ]);
     const seenVideoIds = new Set(seenVideoMetadatas.map(v => v.videoId));
+    // Also exclude currently-displayed videos in case the fire-and-forget
+    // seen cache write hasn't flushed yet
+    for (const v of videoMetadatasRef.current) {
+      seenVideoIds.add(v.videoId);
+    }
     const blockedSet = new Set(blocked);
     return candidateVideos.filter(video => {
       if (seenVideoIds.has(video.videoId)) return false;
