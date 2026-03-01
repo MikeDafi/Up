@@ -1,13 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { Component, useState, useEffect } from 'react';
 import VideosScreen from "./src/screens/VideosScreen";
 import CameraScreen from "./src/screens/CameraScreen";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { Image, StyleSheet, View, Text } from 'react-native';
+import { Image, StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { applyDecayToAllConfidenceScores } from "./src/components/atoms/confidencescores";
-import { isTrustedDevice } from "./src/components/atoms/attestation";
+import { isTrustedDevice, getSessionToken } from "./src/components/atoms/attestation";
 import { hasAcceptedEULA, acceptEULA } from "./src/components/atoms/moderation";
 import EULAScreen from "./src/components/molecules/EULAScreen";
+
+class ErrorBoundary extends Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Uncaught error:', error, errorInfo);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.errorBoundary}>
+          <Text style={styles.errorBoundaryTitle}>Something went wrong</Text>
+          <Text style={styles.errorBoundaryMessage}>
+            The app ran into an unexpected error. Please try again.
+          </Text>
+          <TouchableOpacity style={styles.errorBoundaryButton} onPress={this.handleReset}>
+            <Text style={styles.errorBoundaryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const Tab = createBottomTabNavigator();
 
@@ -26,9 +59,13 @@ export default function App() {
       setTrusted(trustedResult);
       setEulaAccepted(acceptedResult);
 
-      // Non-blocking: decay scores in background after screen mounts
+      // Eagerly attest + decay scores during loading screen so feeds
+      // launch with a valid JWT and fresh confidence scores.
       if (trustedResult && acceptedResult) {
-        applyDecayToAllConfidenceScores().catch(error =>
+        Promise.all([
+          getSessionToken(),
+          applyDecayToAllConfidenceScores(),
+        ]).catch(error =>
           console.error('Error during initialization:', error)
         );
       }
@@ -41,9 +78,11 @@ export default function App() {
     const success = await acceptEULA();
     if (success) {
       setEulaAccepted(true);
-      // Run deferred initialization after EULA acceptance
       try {
-        await applyDecayToAllConfidenceScores();
+        await Promise.all([
+          getSessionToken(),
+          applyDecayToAllConfidenceScores(),
+        ]);
       } catch (error) {
         console.error('Error during initialization:', error);
       }
@@ -67,6 +106,7 @@ export default function App() {
   }
 
   return (
+    <ErrorBoundary>
       <NavigationContainer>
         <Tab.Navigator
             screenOptions={{
@@ -105,6 +145,7 @@ export default function App() {
           />
         </Tab.Navigator>
       </NavigationContainer>
+    </ErrorBoundary>
   );
 }
 
@@ -131,5 +172,35 @@ const styles = StyleSheet.create({
   blockedText: {
     fontSize: 18,
     color: '#444',
+  },
+  errorBoundary: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+    padding: 24,
+  },
+  errorBoundaryTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  errorBoundaryMessage: {
+    fontSize: 16,
+    color: '#aaa',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  errorBoundaryButton: {
+    backgroundColor: '#333',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+  },
+  errorBoundaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -1,10 +1,15 @@
 import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import { cacheData, retrieveCachedData } from './videoCacheStorage';
-import { ATTESTATION_CHALLENGE_URL, SESSION_TOKEN_KEY, ATTESTED_KEY_ID_KEY } from './constants';
+import {
+  ATTESTATION_CHALLENGE_URL,
+  ATTESTATION_VERIFY_URL,
+  SESSION_TOKEN_KEY,
+  ATTESTED_KEY_ID_KEY,
+} from './constants';
 
 // ---------------------------------------------------------------------------
-// Session token cache — avoids re-attestation on every request
+// Session token cache
 // ---------------------------------------------------------------------------
 
 let _cachedSessionToken = null;
@@ -17,22 +22,15 @@ let _attestationInFlight = null;
 /**
  * Get a valid session token, performing attestation if needed.
  *
- * Flow:
- *   1. Return cached in-memory token if still valid
- *   2. Return persisted token from AsyncStorage if still valid
- *   3. Otherwise, perform full attestation flow and cache the new token
- *      (serialized — concurrent callers share a single in-flight attempt)
- *
- * Attestation runs on all builds. If the native module is unavailable
- * (e.g. Expo Go / simulator), it gracefully falls back to no-auth.
+ * Returns a JWT string on success, or null if attestation is unavailable
+ * (e.g. simulator, non-iOS). Concurrent callers share a single in-flight
+ * attestation via mutex.
  */
 export async function getSessionToken() {
-  // Check in-memory cache first (fastest path)
   if (_cachedSessionToken && Date.now() < _cachedSessionExpiry) {
     return _cachedSessionToken;
   }
 
-  // Check persisted token
   const persisted = await retrieveCachedData(SESSION_TOKEN_KEY, null);
   if (persisted && persisted.token && Date.now() < persisted.expiry) {
     _cachedSessionToken = persisted.token;
@@ -40,7 +38,6 @@ export async function getSessionToken() {
     return persisted.token;
   }
 
-  // No valid token — perform attestation (serialized via mutex)
   if (_attestationInFlight) {
     return _attestationInFlight;
   }
@@ -63,132 +60,112 @@ export async function clearSessionToken() {
 // Core attestation flow
 // ---------------------------------------------------------------------------
 
-async function _performAttestation() {
-  // Step 1: Get a challenge nonce from the server
-  const nonce = await _fetchChallenge();
-
-  // Step 2: Get the iOS attestation token
+/**
+ * Perform attestation and exchange it for a session JWT immediately.
+ *
+ * Instead of piggybacking the attestation on a business API request, we
+ * send it to a dedicated verification endpoint and get a JWT back. If the
+ * server rejects a stale assertion, we clear the key and retry with full
+ * attestation — all before any business request is made.
+ */
+async function _performAttestation(forceFullAttestation = false) {
   if (Platform.OS !== 'ios') {
     console.warn('Attestation only supported on iOS');
     return null;
   }
 
+  const nonce = await _fetchChallenge();
+
   let attestationPayload;
   try {
-    attestationPayload = await _getAppleAttestation(nonce);
+    attestationPayload = await _getAppleAttestation(nonce, forceFullAttestation);
   } catch (e) {
-    // Attestation failed entirely (e.g. corrupt native key state after rebuild).
-    // Clear all stored attestation state so the next attempt starts fresh.
-    console.warn('[Attestation] Full attestation failed, clearing state and falling back:', e.message);
+    console.warn('[Attestation] Failed, clearing state:', e.message);
     await cacheData(ATTESTED_KEY_ID_KEY, null);
     await clearSessionToken();
-    _pendingAttestation = null;
-    return null; // Proceed without auth — server will reject if it requires attestation
+    return null;
   }
 
-  // The attestation token is sent with the first real API request.
-  // The server verifies it and returns a session JWT in the response body.
-  // We store the attestation payload so getAttestationHeaders() can use it.
-  _pendingAttestation = attestationPayload;
-
-  return null; // No session token yet — it comes back from the first API response
+  // Exchange attestation for JWT via the verification endpoint
+  return _exchangeAttestationForJWT(attestationPayload);
 }
 
-// Pending attestation to be sent with the next request
-let _pendingAttestation = null;
+/**
+ * Send attestation to the verification endpoint and return the JWT.
+ * If the server rejects a stale assertion (403), clears the key and
+ * retries once with full attestation using a fresh nonce.
+ */
+async function _exchangeAttestationForJWT(attestationPayload) {
+  try {
+    const response = await fetch(ATTESTATION_VERIFY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Attestation-Token': JSON.stringify(attestationPayload),
+      },
+      body: JSON.stringify({}),
+    });
 
-// Gate so concurrent callers wait while the first request exchanges the
-// attestation token for a session JWT.
-let _sessionTokenGate = null;
-let _sessionTokenGateResolve = null;
+    if (response.ok) {
+      const data = await response.json();
+      if (data.session_token) {
+        await _persistSessionToken(data.session_token);
+        return data.session_token;
+      }
+      // Server accepted but returned no token (e.g. BYPASS_ATTESTATION mode)
+      return null;
+    }
+
+    // Stale assertion key — clear and retry with full attestation
+    if (response.status === 403 && attestationPayload.type === 'assertion') {
+      console.warn('[Attestation] Assertion rejected by server, re-attesting with fresh key');
+      await cacheData(ATTESTED_KEY_ID_KEY, null);
+      return _performAttestation(true);
+    }
+
+    const errorBody = await response.text().catch(() => '');
+    console.warn(`[Attestation] Verification failed (${response.status}): ${errorBody}`);
+    return null;
+  } catch (e) {
+    console.warn('[Attestation] Verification request failed:', e.message);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Request headers (simplified — JWT is always obtained before business calls)
+// ---------------------------------------------------------------------------
 
 /**
- * Get headers for the next API request.
- * If there's a pending attestation (no session token yet), the FIRST caller
- * consumes it. Concurrent callers wait until the session JWT comes back.
+ * Get headers for an API request. If a valid JWT exists, it's included
+ * as a Bearer token. No piggybacking or gating needed.
  */
 export async function getRequestHeaders() {
   const headers = { 'Content-Type': 'application/json' };
-
-  // If another request is already carrying the attestation token, wait for it
-  if (_sessionTokenGate) {
-    await _sessionTokenGate;
-    const token = await getSessionToken();
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-      return headers;
-    }
-    // Gate released but no token (e.g. first request got 403).
-    // Fall through to re-trigger attestation below.
-  }
-
-  // Try to get a session token first (may trigger attestation which sets _pendingAttestation)
   const token = await getSessionToken();
-
-  // Re-check: another concurrent caller may have consumed _pendingAttestation
-  // and set the gate while we were awaiting getSessionToken()
-  if (_sessionTokenGate) {
-    await _sessionTokenGate;
-    const freshToken = await getSessionToken();
-    if (freshToken) {
-      headers['Authorization'] = `Bearer ${freshToken}`;
-    }
-    return headers;
-  }
-
-  // If attestation just ran, consume it — only ONE request carries the nonce
-  if (_pendingAttestation) {
-    headers['X-Attestation-Token'] = JSON.stringify(_pendingAttestation);
-    _pendingAttestation = null;
-
-    // Block concurrent callers until the session token arrives
-    _sessionTokenGate = new Promise((resolve) => {
-      _sessionTokenGateResolve = resolve;
-    });
-
-    return headers;
-  }
-
-  // Otherwise use the cached session JWT
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-
   return headers;
 }
 
 /**
- * Process the response from an API call.
- * If it contains a session_token, cache it and unblock waiting callers.
- * If it returned 403, clear the session and re-attest.
+ * Handle attestation-related state from an API response.
+ * On 403, clears cached credentials so the next request re-attests.
  */
 export async function handleAttestationResponse(response, responseBody) {
-  // Cache any new session token from the response
   if (responseBody && responseBody.session_token) {
     await _persistSessionToken(responseBody.session_token);
-    _pendingAttestation = null; // Attestation was accepted
-    _releaseSessionTokenGate();
   }
 
-  // If 403, the session/key is invalid — clear everything and force full re-attestation
   if (response.status === 403) {
+    if (_attestationInFlight) {
+      await _attestationInFlight.catch(() => {});
+      return;
+    }
+
     await clearSessionToken();
-    await cacheData(ATTESTED_KEY_ID_KEY, null); // Clear stale attestation key
-    _pendingAttestation = null;
-    _releaseSessionTokenGate();
-
-    // Proactively re-attest so subsequent/waiting callers pick up a fresh token
-    getSessionToken().catch(e =>
-      console.warn('[Attestation] Background re-attestation failed:', e.message)
-    );
-  }
-}
-
-function _releaseSessionTokenGate() {
-  if (_sessionTokenGateResolve) {
-    _sessionTokenGateResolve();
-    _sessionTokenGate = null;
-    _sessionTokenGateResolve = null;
+    await cacheData(ATTESTED_KEY_ID_KEY, null);
   }
 }
 
@@ -215,39 +192,33 @@ async function _fetchChallenge() {
 // ---------------------------------------------------------------------------
 
 /**
- * Perform Apple App Attest.
- *
- * Uses the native DCAppAttestService via a native module.
- * Requires: react-native-app-integrity or a custom native bridge.
- *
- * Flow:
- *   - First time: generateKey() → attestKey(keyId, nonceHash) → full attestation
- *   - Subsequent: generateAssertion(storedKeyId, nonceHash) → lightweight assertion
+ * Generate an Apple App Attest assertion (lightweight, if key exists)
+ * or full attestation (first time / after key invalidation).
  */
-async function _getAppleAttestation(nonce) {
+async function _getAppleAttestation(nonce, forceFullAttestation = false) {
   const AppIntegrity = require('@expo/app-integrity');
 
   if (!AppIntegrity.isSupported) {
-    throw new Error('App Attest is not supported on this device. A real iOS device with a dev-client build is required.');
+    throw new Error('App Attest is not supported on this device.');
   }
 
-  // Clear any stale cached key from previous installs/builds
-  const storedKeyId = await retrieveCachedData(ATTESTED_KEY_ID_KEY, null);
+  const storedKeyId = forceFullAttestation
+    ? null
+    : await retrieveCachedData(ATTESTED_KEY_ID_KEY, null);
 
   if (storedKeyId) {
-    // Lightweight assertion with existing key
     try {
       const assertion = await AppIntegrity.generateAssertionAsync(storedKeyId, nonce);
       return {
         platform: 'ios',
         type: 'assertion',
-        token: assertion, // base64-encoded CBOR assertion
+        token: assertion,
         key_id: storedKeyId,
         nonce,
       };
     } catch (e) {
-      console.warn('[Attestation] Assertion failed, re-attesting');
-      await cacheData(ATTESTED_KEY_ID_KEY, null); // Clear invalid key
+      console.warn('[Attestation] Assertion failed, re-attesting:', e.message);
+      await cacheData(ATTESTED_KEY_ID_KEY, null);
     }
   }
 
@@ -256,33 +227,18 @@ async function _getAppleAttestation(nonce) {
   try {
     keyId = await AppIntegrity.generateKeyAsync();
   } catch (firstError) {
-    // Native key state may be corrupt (e.g. after app rebuild).
-    // Wait briefly and retry once — the first call can clear stale state.
     console.warn('[Attestation] Key generation failed, retrying once:', firstError.message);
     await new Promise(r => setTimeout(r, 500));
-    try {
-      keyId = await AppIntegrity.generateKeyAsync();
-    } catch (retryError) {
-      console.error('[Attestation] Key generation failed on retry');
-      throw retryError;
-    }
+    keyId = await AppIntegrity.generateKeyAsync();
   }
 
-  let attestation;
-  try {
-    attestation = await AppIntegrity.attestKeyAsync(keyId, nonce);
-  } catch (e) {
-    console.error('[Attestation] Key attestation failed');
-    throw e;
-  }
-
-  // Persist the key ID for future assertions
+  const attestation = await AppIntegrity.attestKeyAsync(keyId, nonce);
   await cacheData(ATTESTED_KEY_ID_KEY, keyId);
 
   return {
     platform: 'ios',
     type: 'attestation',
-    token: attestation, // base64-encoded CBOR attestation object
+    token: attestation,
     key_id: keyId,
     nonce,
   };
@@ -293,14 +249,12 @@ async function _getAppleAttestation(nonce) {
 // ---------------------------------------------------------------------------
 
 async function _persistSessionToken(token) {
-  // Decode the JWT payload to get expiry (without verification — server already verified)
   let expiry;
   try {
     const payloadB64 = token.split('.')[1];
     const payload = JSON.parse(atob(payloadB64));
-    expiry = payload.exp * 1000; // Convert to milliseconds
+    expiry = payload.exp * 1000;
   } catch (e) {
-    // Default to 50 minutes if we can't decode (safe margin under the 1hr server TTL)
     expiry = Date.now() + 50 * 60 * 1000;
   }
 
@@ -311,7 +265,7 @@ async function _persistSessionToken(token) {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy exports (for backward compatibility with App.js isTrustedDevice check)
+// Device trust check (used by App.js)
 // ---------------------------------------------------------------------------
 
 export async function getAttestationInfo() {
@@ -334,7 +288,6 @@ export async function getAttestationInfo() {
   return info;
 }
 
-// Returns true for real, non-rooted devices. Bypasses in __DEV__ for simulators.
 export async function isTrustedDevice() {
   if (__DEV__) { // eslint-disable-line no-undef
     return true;

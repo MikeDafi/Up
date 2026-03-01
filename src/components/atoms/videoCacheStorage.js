@@ -80,14 +80,24 @@ export const getAndSetVideoScreenTutorialSeenCache = async () => {
     return seen;
 }
 
-export const getUUIDCache = async () => {
-    const uuid = await retrieveCachedData('uuid', null);
-    if (!uuid) {
-        const newUUID = generateUUID();
-        await cacheData('uuid', newUUID);
-        return newUUID;
+let _uuidPromise = null;
+
+export const getUUIDCache = () => {
+    if (!_uuidPromise) {
+        _uuidPromise = (async () => {
+            try {
+                const uuid = await retrieveCachedData('uuid', null);
+                if (uuid) return uuid;
+                const newUUID = generateUUID();
+                await cacheData('uuid', newUUID);
+                return newUUID;
+            } catch (e) {
+                _uuidPromise = null;
+                throw e;
+            }
+        })();
     }
-    return uuid;
+    return _uuidPromise;
 };
 
 export const getHashtagConfidenceScoreMetadatasCache = async (video_feed_type) => {

@@ -10,7 +10,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-cu# Initialize the DynamoDB client
+# Initialize the DynamoDB client
 dynamodb = boto3.resource('dynamodb')
 hashtag_table = dynamodb.Table('up-hashtag')
 hashtag_registry_table = dynamodb.Table('up-hashtag-registry')
@@ -259,16 +259,16 @@ def fetch_all_hashtags():
     _hashtag_cache["expires_at"] = now + HASHTAG_CACHE_TTL_SECONDS
     return hashtags
 
-def should_generate_new_feed(last_updated_feed):
+def should_generate_new_feed(last_updated_ts):
     """
     Determine if a new feed should be generated based on the last update time.
     """
-    if not last_updated_feed: # Probably a new account to not have last_updated_feed
+    if not last_updated_ts:
         return True
-    last_updated_feed = datetime.fromisoformat(last_updated_feed)
-    if last_updated_feed.tzinfo is None:
-        last_updated_feed = last_updated_feed.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - last_updated_feed) >= timedelta(minutes=2)
+    last_updated = datetime.fromisoformat(last_updated_ts)
+    if last_updated.tzinfo is None:
+        last_updated = last_updated.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - last_updated) >= timedelta(minutes=2)
 
 def update_user_feed(user_id, video_feed):
     """
@@ -290,15 +290,18 @@ def update_user_feed(user_id, video_feed):
         raise
 
 
-def update_individual_feed_timestamp(user_id):
+def update_individual_feed_timestamp(user_id, video_feed_type):
     """
-    Record that an individual feed was just generated for this user.
-    Uses last_updated_feed — separate from the batch timestamp.
+    Record that an individual feed was just generated for this user + feed type.
+    Each feed type tracks its own rate-limit timestamp so two concurrent
+    VideoProviders (e.g. audio vs focused) don't block each other.
     """
+    field = f"last_updated_feed_{video_feed_type}"
     try:
         user_profiles_table.update_item(
             Key={'user_id': user_id},
-            UpdateExpression="SET last_updated_feed = :ts",
+            UpdateExpression=f"SET #f = :ts",
+            ExpressionAttributeNames={'#f': field},
             ExpressionAttributeValues={
                 ':ts': datetime.now(timezone.utc).isoformat()
             }
@@ -321,7 +324,8 @@ def process_individual_user(user_id, video_feed_type, limit):
     if not user_profile:
         raise Exception(f"User profile not found for user_id {user_id}")
     
-    if not should_generate_new_feed(user_profile.get('last_updated_feed')):
+    rate_limit_field = f"last_updated_feed_{video_feed_type}"
+    if not should_generate_new_feed(user_profile.get(rate_limit_field)):
         raise Exception(f"{TOO_MANY_REQUESTS_ERROR} for user_id {user_id}, please wait a couple minutes")
 
     # Get the user's hashtag to confidence scores from algorithm.<feed_type>
@@ -342,8 +346,7 @@ def process_individual_user(user_id, video_feed_type, limit):
     if not video_feed:
         logger.warning(f"No video feed generated for user {user_id}. {video_feed}")
 
-    # Record the individual rate-limit timestamp so subsequent requests within 5 min are throttled
-    update_individual_feed_timestamp(user_id)
+    update_individual_feed_timestamp(user_id, video_feed_type)
 
     return video_feed
 

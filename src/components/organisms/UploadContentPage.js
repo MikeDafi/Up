@@ -1,4 +1,4 @@
-import React, {useCallback, useState, useEffect} from 'react';
+import React, {useCallback, useRef, useState, useEffect} from 'react';
 import {
   Keyboard,
   StyleSheet,
@@ -44,6 +44,7 @@ const UploadContentPage = () => {
   const [hashtagInput, setHashtagInput] = useState('');
   const [muteByDefault, setMuteByDefault] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [progress, setProgress] = useState(0);
   const [isLoadingVideo, setIsLoadingVideo] = useState(false);
   const [error, setError] = useState('');
@@ -132,10 +133,10 @@ const UploadContentPage = () => {
   };
 
   const submitMedia = async () => {
-    if (!validateFields()) {
-      return;
-    }
+    if (submittingRef.current) return;
+    if (!validateFields()) return;
 
+    submittingRef.current = true;
     setIsSubmitting(true);
     setProgress(0.2);
     try {
@@ -173,8 +174,9 @@ const UploadContentPage = () => {
     } catch (error) {
       console.error('Error submitting media:', error.message);
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
-      setTimeout(() => setProgress(0), 1000); // Reset progress after 1 second
+      setTimeout(() => setProgress(0), 1000);
     }
   };
 

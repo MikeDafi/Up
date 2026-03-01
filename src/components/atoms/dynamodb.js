@@ -96,7 +96,7 @@ export const fetchFeed = async (payload) => {
   } catch (error) {
     if (error.message.includes("Too many new feed requests")) {
       console.warn('Too many new feed requests', error.message);
-      return error;
+      throw error;
     }
     console.error('Error fetching feed:', error.message);
     throw error; // Re-throw to allow the caller to handle it

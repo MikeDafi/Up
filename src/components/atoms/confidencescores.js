@@ -218,5 +218,6 @@ export const uploadHashtagConfidenceScores = async () => {
     return payload;
   } catch (error) {
     console.error("Failed to upload hashtag confidence scores:", error.message);
+    return {};
   }
 }

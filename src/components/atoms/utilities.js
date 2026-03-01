@@ -15,8 +15,11 @@ export const backoff = (
         attempts++;
         const elapsedTime = Date.now() - startTime;
 
-        if (attempts >= maxRetries || elapsedTime > timeout) {
-          console.error(`Max retries or timeout reached after ${elapsedTime}ms.`);
+        const isRateLimit = error.message && error.message.includes('429');
+        if (isRateLimit || attempts >= maxRetries || elapsedTime > timeout) {
+          if (!isRateLimit) {
+            console.error(`Max retries or timeout reached after ${elapsedTime}ms.`);
+          }
           throw error;
         }
 

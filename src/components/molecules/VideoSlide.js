@@ -122,10 +122,15 @@ const VideoSlide = () => {
   }, [videoSlideVideoRefs]);
 
   const handleVideoError = useCallback((videoId, error) => {
-    console.error('Video playback error');
+    const url = `${COMPRESSED_S3_BUCKET}/${videoId}`;
+    console.error(`Video playback error for ${videoId}: ${error}\nURL: ${url}`);
 
-    if (typeof error === 'string' && error.includes('-1102 and domain "NSURLErrorDomain"')) {
-      error = `Failed to load video ${videoId}. Video may not exist in S3 bucket.`;
+    if (typeof error === 'string') {
+      if (error.includes('permission') || error.includes('403')) {
+        error = `Access denied loading video. The S3 bucket may not allow public reads. URL: ${url}`;
+      } else if (error.includes('-1102') || error.includes('NSURLErrorDomain')) {
+        error = `Failed to load video ${videoId}. Video may not exist in S3 bucket.`;
+      }
     }
     setVideoError(error);
   }, [setVideoError]);

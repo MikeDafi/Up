@@ -1,23 +1,15 @@
 name: Deploy to Staging
 
 on:
-  # Trigger on direct pushes to main
   push:
     branches:
       - main
-  # Also trigger on PR merges to main
-  pull_request:
-    branches:
-      - main
-    types:
-      - closed
 
 jobs:
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
-    # Run if: direct push to main OR merged PR
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    if: github.event_name == 'push'
     steps:
       - name: Check for EXPO_TOKEN
         run: |
@@ -48,12 +40,4 @@ jobs:
       - name: Publish to Staging
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT_NAME" == "push" ]; then
-            MESSAGE="$COMMIT_MESSAGE"
-          else
-            MESSAGE="$PR_TITLE"
-          fi
-          eas update --branch staging --message "$MESSAGE"
+        run: eas update --branch staging --message "$COMMIT_MESSAGE"
