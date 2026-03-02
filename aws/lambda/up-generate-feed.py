@@ -28,10 +28,35 @@ debug_mode = False  # Set to False to disable debug logs
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
 
+def _fetch_fallback_videos(exclude_ids: set, limit: int):
+    """
+    Scan videometadata for recent READY videos to pad an undersized feed.
+    Returns up to `limit` metadata dicts, excluding videos in exclude_ids.
+    """
+    try:
+        response = videometadata_table.scan(
+            ProjectionExpression=_VIDEO_METADATA_FIELDS,
+            ExpressionAttributeNames=_VIDEO_METADATA_EXPR_NAMES,
+            FilterExpression='compressionStatus = :ready',
+            ExpressionAttributeValues={':ready': 'READY'},
+            Limit=200,
+        )
+        items = response.get('Items', [])
+        items = [i for i in items if i['videoId'] not in exclude_ids]
+        random.shuffle(items)
+        for item in items:
+            item.pop('compressionStatus', None)
+        return items[:limit]
+    except Exception as e:
+        logger.error(f"Fallback video scan failed: {e}")
+        return []
+
+
 def generate_video_feed(user_id, hashtags, confidence_scores, limit, seen_checksums=None):
     """
     Generate a video feed using hashtags, querying the up-hashtag table's default hashtag-timestamp index.
     Maintain the order of user_feed_hashtags_ordered and place video_ids into the identical index as seen in user_feed_hashtags_ordered.
+    Falls back to a metadata scan when the hashtag approach yields too few results.
     """
     if seen_checksums is None:
         seen_checksums = set()
@@ -41,6 +66,15 @@ def generate_video_feed(user_id, hashtags, confidence_scores, limit, seen_checks
     if not video_ids:
         logger.warning("No video IDs retrieved, returning empty feed.")
     video_metadatas = get_video_metadatas(video_ids)
+
+    if len(video_metadatas) < limit:
+        shortfall = limit - len(video_metadatas)
+        existing_ids = {v['videoId'] for v in video_metadatas} | seen_checksums
+        fallback = _fetch_fallback_videos(existing_ids, shortfall)
+        if fallback:
+            logger.info(f"Padded feed with {len(fallback)} fallback videos (had {len(video_metadatas)}/{limit})")
+            video_metadatas.extend(fallback)
+
     logger.debug(f"Generated video feed: {video_metadatas}")
     return video_metadatas
 
@@ -318,12 +352,28 @@ def extract_seen_checksums(user_profile: dict) -> set:
 def process_individual_user(user_id, video_feed_type, limit):
     """
     Process an individual user's request for a video feed.
-    Rate-limited by last_updated_feed (individual requests only — batch uses a separate timestamp).
+    Returns the batch-pre-generated feed if fresh, otherwise generates on the fly.
+    Rate-limited by last_updated_feed_<type> (individual requests only).
     """
     user_profile = fetch_user_profile(user_id)
     if not user_profile:
-        raise Exception(f"User profile not found for user_id {user_id}")
-    
+        logger.info(f"New user {user_id}, creating profile and generating discovery feed")
+        user_profiles_table.put_item(
+            Item={'user_id': user_id},
+            ConditionExpression='attribute_not_exists(user_id)',
+        )
+        user_profile = {'user_id': user_id}
+
+    # If the batch job pre-generated a feed that's still fresh, return it immediately
+    pre_generated = user_profile.get('video_feed')
+    batch_ts = user_profile.get('last_batch_feed_update')
+    if pre_generated and batch_ts and not should_generate_new_feed(batch_ts):
+        seen_checksums = extract_seen_checksums(user_profile)
+        filtered = [v for v in pre_generated if v.get('videoId') not in seen_checksums]
+        if filtered:
+            logger.info(f"Returning pre-generated feed for {user_id} ({len(filtered)} videos)")
+            return filtered[:limit]
+
     rate_limit_field = f"last_updated_feed_{video_feed_type}"
     if not should_generate_new_feed(user_profile.get(rate_limit_field)):
         raise Exception(f"{TOO_MANY_REQUESTS_ERROR} for user_id {user_id}, please wait a couple minutes")
