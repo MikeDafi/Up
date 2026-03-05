@@ -4,6 +4,7 @@ import PropTypes from 'prop-types';
 import {VideoContext} from '../atoms/contexts';
 
 import {
+  FEED_DISABLED,
   MAX_REATTEMPT_FETCHING_FEED_INTERVAL, NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE,
   NUM_VIDEOS_TO_REQUEST,
   REATTEMPT_FETCHING_FEED_INTERVAL,
@@ -263,7 +264,9 @@ const VideoProvider = ({children, video_feed_type}) => {
 
     if (unSeenVideoMetadatasBatch.length === 0) {
       setRefreshing(false);
-      setError("No new videos found");
+      if (videoMetadatasRef.current.length === 0) {
+        setError("No new videos found");
+      }
       return;
     }
 
@@ -291,7 +294,7 @@ const VideoProvider = ({children, video_feed_type}) => {
   useEffect(() => {
     let retryFetch;
 
-    if (checkedCache && videoMetadatas.length === 0 && reAttemptFetchingFeedInterval < MAX_REATTEMPT_FETCHING_FEED_INTERVAL) {
+    if (!FEED_DISABLED && checkedCache && videoMetadatas.length === 0 && reAttemptFetchingFeedInterval < MAX_REATTEMPT_FETCHING_FEED_INTERVAL) {
       retryFetch = setTimeout(async () => {
         await fetchNewVideos(false);
         setreAttemptFetchingFeedInterval(Math.min(reAttemptFetchingFeedInterval * 2, MAX_REATTEMPT_FETCHING_FEED_INTERVAL));
@@ -344,7 +347,9 @@ const VideoProvider = ({children, video_feed_type}) => {
   };
   // Initialize data and load videos
   useEffect(() => {
-    checkVideoCache();
+    if (!FEED_DISABLED) {
+      checkVideoCache();
+    }
   }, []);
   
   useEffect(() => {
@@ -428,6 +433,19 @@ const VideoProvider = ({children, video_feed_type}) => {
       const nextIndex = currentIndex + 1;
       await triggerVideoIndex(nextIndex, true, true);
     }
+  }
+
+  if (FEED_DISABLED) {
+    return (
+        <View style={{justifyContent: "center", alignItems: "center", top: 150, paddingHorizontal: 30 }}>
+          <Text style={{ marginTop: 20, color: "white", fontSize: 18, fontWeight: "bold", textAlign: "center" }}>
+            New Product
+          </Text>
+          <Text style={{ marginTop: 12, color: "#ccc", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
+            User Generated Videos will come once this app is released on the App Store
+          </Text>
+        </View>
+    );
   }
 
   if (!checkedCache) {

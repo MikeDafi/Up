@@ -28,10 +28,11 @@ debug_mode = False  # Set to False to disable debug logs
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
 
-def _fetch_fallback_videos(exclude_ids: set, limit: int):
+def _fetch_fallback_videos(exclude_ids: set, seen_checksums: set, limit: int):
     """
     Scan videometadata for recent READY videos to pad an undersized feed.
-    Returns up to `limit` metadata dicts, excluding videos in exclude_ids.
+    Returns up to `limit` metadata dicts, excluding videos in exclude_ids
+    and videos whose 8-char checksum prefix is in seen_checksums.
     """
     try:
         response = videometadata_table.scan(
@@ -42,7 +43,11 @@ def _fetch_fallback_videos(exclude_ids: set, limit: int):
             Limit=200,
         )
         items = response.get('Items', [])
-        items = [i for i in items if i['videoId'] not in exclude_ids]
+        items = [
+            i for i in items
+            if i['videoId'] not in exclude_ids
+            and i['videoId'][:8] not in seen_checksums
+        ]
         random.shuffle(items)
         for item in items:
             item.pop('compressionStatus', None)
@@ -69,8 +74,8 @@ def generate_video_feed(user_id, hashtags, confidence_scores, limit, seen_checks
 
     if len(video_metadatas) < limit:
         shortfall = limit - len(video_metadatas)
-        existing_ids = {v['videoId'] for v in video_metadatas} | seen_checksums
-        fallback = _fetch_fallback_videos(existing_ids, shortfall)
+        existing_ids = {v['videoId'] for v in video_metadatas}
+        fallback = _fetch_fallback_videos(existing_ids, seen_checksums, shortfall)
         if fallback:
             logger.info(f"Padded feed with {len(fallback)} fallback videos (had {len(video_metadatas)}/{limit})")
             video_metadatas.extend(fallback)

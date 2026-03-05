@@ -1,4 +1,6 @@
-import { ENV_NAME } from '@env';
+import { ENV_NAME, DISABLE_FEED } from '@env';
+
+export const FEED_DISABLED = DISABLE_FEED === 'true';
 
 export const VideoFeedType = {
     VIDEO_FOCUSED_FEED: 'VIDEO_FOCUSED_FEED',
