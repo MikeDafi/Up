@@ -4,7 +4,6 @@ import PropTypes from 'prop-types';
 import {VideoContext} from '../atoms/contexts';
 
 import {
-  FEED_DISABLED,
   MAX_REATTEMPT_FETCHING_FEED_INTERVAL, NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE,
   NUM_VIDEOS_TO_REQUEST,
   REATTEMPT_FETCHING_FEED_INTERVAL,
@@ -109,8 +108,18 @@ const deduplicateAcrossFeeds = (newVideos, currentFeedType) => {
   return kept;
 };
 
+const uniqueByVideoId = (videos) => {
+  const seen = new Set();
+  return videos.filter((video) => {
+    if (!video?.videoId || seen.has(video.videoId)) return false;
+    seen.add(video.videoId);
+    return true;
+  });
+};
+
 const VideoProvider = ({children, video_feed_type}) => {
   const isFocused = useIsFocused();
+  const isFetchingRef = useRef(false);
   const [isMuted, setMuted] = useState(video_feed_type === VideoFeedType.VIDEO_FOCUSED_FEED);
   const [isLiked, setLiked] = useState(false);
   const [isPaused, setPaused] = useState(false);
@@ -217,7 +226,8 @@ const VideoProvider = ({children, video_feed_type}) => {
   }
 
   const fetchNewVideos = async (isManual = false, setRefreshingVariable = true) => {
-    const currentVideoMetadatas = videoMetadatasRef.current;
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     const currentVideoIndex = videoIndexExternalViewRef.current;
     setError("");
 
@@ -252,12 +262,16 @@ const VideoProvider = ({children, video_feed_type}) => {
       }
       videoMetadataBatch = response.video_feed.map(videoRawMetadata => new VideoMetadata(videoRawMetadata));
       videoMetadataBatch = deduplicateAcrossFeeds(videoMetadataBatch, video_feed_type);
+      videoMetadataBatch = uniqueByVideoId(videoMetadataBatch);
     } catch (err) {
       const isRateLimit = err.message && err.message.includes('429');
       if (!isRateLimit) {
         console.error("Error fetching videos:", err.message);
         setError(err.message);
       }
+      isFetchingRef.current = false;
+      setRefreshing(false);
+      return;
     }
 
     let unSeenVideoMetadatasBatch = await filterUnseenAndUnblocked(videoMetadataBatch);
@@ -267,21 +281,33 @@ const VideoProvider = ({children, video_feed_type}) => {
       if (videoMetadatasRef.current.length === 0) {
         setError("No new videos found");
       }
+      isFetchingRef.current = false;
+      return;
+    }
+
+    // Final dedup: guard against race conditions or server re-sending existing videos
+    const existingIds = new Set(videoMetadatasRef.current.map(v => v.videoId));
+    unSeenVideoMetadatasBatch = unSeenVideoMetadatasBatch.filter(v => !existingIds.has(v.videoId));
+
+    if (unSeenVideoMetadatasBatch.length === 0) {
+      setRefreshing(false);
+      isFetchingRef.current = false;
       return;
     }
 
     let videosToCache;
     if (isManual) {
-      videosToCache = unSeenVideoMetadatasBatch;
+      videosToCache = uniqueByVideoId(unSeenVideoMetadatasBatch);
       setVideoMetadatas(videosToCache);
       await triggerVideoIndex(0);
     } else {
-      videosToCache = [...currentVideoMetadatas, ...unSeenVideoMetadatasBatch];
+      videosToCache = uniqueByVideoId([...videoMetadatasRef.current, ...unSeenVideoMetadatasBatch]);
       setVideoMetadatas(videosToCache);
       await triggerVideoIndex(currentVideoIndex);
     }
 
     setRefreshing(false);
+    isFetchingRef.current = false;
 
     // Fire-and-forget: parallel cache writes don't affect rendered state
     Promise.all([
@@ -294,7 +320,7 @@ const VideoProvider = ({children, video_feed_type}) => {
   useEffect(() => {
     let retryFetch;
 
-    if (!FEED_DISABLED && checkedCache && videoMetadatas.length === 0 && reAttemptFetchingFeedInterval < MAX_REATTEMPT_FETCHING_FEED_INTERVAL) {
+    if (checkedCache && videoMetadatas.length === 0 && reAttemptFetchingFeedInterval < MAX_REATTEMPT_FETCHING_FEED_INTERVAL) {
       retryFetch = setTimeout(async () => {
         await fetchNewVideos(false);
         setreAttemptFetchingFeedInterval(Math.min(reAttemptFetchingFeedInterval * 2, MAX_REATTEMPT_FETCHING_FEED_INTERVAL));
@@ -347,9 +373,7 @@ const VideoProvider = ({children, video_feed_type}) => {
   };
   // Initialize data and load videos
   useEffect(() => {
-    if (!FEED_DISABLED) {
-      checkVideoCache();
-    }
+    checkVideoCache();
   }, []);
   
   useEffect(() => {
@@ -433,19 +457,6 @@ const VideoProvider = ({children, video_feed_type}) => {
       const nextIndex = currentIndex + 1;
       await triggerVideoIndex(nextIndex, true, true);
     }
-  }
-
-  if (FEED_DISABLED) {
-    return (
-        <View style={{justifyContent: "center", alignItems: "center", top: 150, paddingHorizontal: 30 }}>
-          <Text style={{ marginTop: 20, color: "white", fontSize: 18, fontWeight: "bold", textAlign: "center" }}>
-            New Product
-          </Text>
-          <Text style={{ marginTop: 12, color: "#ccc", fontSize: 15, textAlign: "center", lineHeight: 22 }}>
-            User Generated Videos will come once this app is released on the App Store
-          </Text>
-        </View>
-    );
   }
 
   if (!checkedCache) {

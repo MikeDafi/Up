@@ -200,7 +200,7 @@ const VideoSlide = () => {
               }
               horizontal
               pagingEnabled
-              keyExtractor={(item) => item.videoId}
+              keyExtractor={(item, index) => `${item.videoId}-${index}`}
               viewabilityConfig={viewabilityConfig.current}
               onViewableItemsChanged={onViewableItemsChanged}
               onEndReached={() => fetchNewVideos(false, false)}
