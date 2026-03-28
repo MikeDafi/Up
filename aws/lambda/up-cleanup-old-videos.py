@@ -25,7 +25,7 @@ def lambda_handler(event, context):
     # Configuration
     DYNAMODB_TABLE = 'up-videometadata'
     S3_BUCKET = 'up-compressed-content'
-    VIDEO_EXPIRY_DAYS = 7  # Delete videos older than 7 days
+    VIDEO_EXPIRY_DAYS = 90  # Delete videos older than 90 days
     
     # Initialize AWS clients
     dynamodb = boto3.client('dynamodb', region_name='us-east-2')

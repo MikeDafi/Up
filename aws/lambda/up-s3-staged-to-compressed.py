@@ -88,7 +88,7 @@ def lambda_handler(event, context):
             if not os.path.exists(compressed_path) or os.path.getsize(compressed_path) == 0:
                 raise Exception(f"Compression failed or output file is empty: {compressed_path}")
 
-            s3_client.upload_file(compressed_path, COMPRESSED_BUCKET, object_key)
+            s3_client.upload_file(compressed_path, COMPRESSED_BUCKET, object_key, ExtraArgs={"ContentType": "video/mp4"})
             logger.info("Uploaded compressed file to %s/%s", COMPRESSED_BUCKET, object_key)
 
             update_compression_status(object_key, "READY")
