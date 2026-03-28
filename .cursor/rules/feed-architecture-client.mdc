@@ -1,0 +1,55 @@
+---
+description: Client feed architecture invariants for VideoProvider/VideoSlide
+globs:
+  - src/components/molecules/VideoProvider.js
+  - src/components/molecules/VideoSlide.js
+  - src/components/atoms/videoCacheStorage.js
+  - src/components/atoms/confidencescores.js
+alwaysApply: false
+---
+
+# Feed Architecture Skills (Client)
+
+Use this when editing feed behavior in React Native.
+
+## Ownership Boundaries
+
+1. `VideoProvider` owns feed fetching, dedupe, seen filtering, and retry policy.
+2. `VideoSlide` should remain mostly presentational and playback-focused.
+3. Avoid duplicating business logic across both files.
+
+## Invariants (Do Not Break)
+
+1. **No duplicate videos in list state**
+   - Always dedupe by `videoId` before setting `videoMetadatas`.
+   - Apply dedupe for both manual refresh replacement and incremental append.
+
+2. **Seen filtering uses storage + in-memory**
+   - Include currently displayed list IDs in seen set in case async cache writes lag.
+
+3. **Refresh race control**
+   - Maintain single in-flight fetch guard (`isFetchingRef`) to prevent overlapping pulls.
+
+4. **FlatList key safety**
+   - Key extractor must remain collision-resistant even if backend returns duplicates temporarily.
+
+## Performance Contracts
+
+1. Avoid synchronous heavy work in `onViewableItemsChanged`.
+2. Keep confidence score writes batched/debounced (in-memory first, async flush).
+3. Do not reintroduce high-frequency status polling patterns that hammer JS/native bridge.
+
+## Error Handling Contracts
+
+1. A single video playback failure must not wipe the entire session list.
+2. Prefer removing only the broken item and continuing playback.
+3. When no videos are available, retry behavior should back off and surface state clearly.
+
+## When Debugging Feed Regressions
+
+Check in this order:
+1. Server response size and shape.
+2. Cross-feed assignment + dedupe.
+3. Seen filter exclusions.
+4. Post-filter list length.
+5. FlatList key uniqueness warnings.
