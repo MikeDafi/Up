@@ -1,0 +1,219 @@
+---
+description: Videos CLI - TikTok video retrieval and publishing tool for the Up app
+globs:
+  - video_retrieval/**
+  - aws/lambda/up-create-video-metadata.py
+  - aws/lambda/up-s3-staged-to-compressed.py
+---
+
+# Videos CLI
+
+A CLI tool for scraping TikTok videos, downloading them, and publishing to AWS S3 for the Up video feed app.
+
+## Location
+
+```
+video_retrieval/videos
+```
+
+## Quick Reference
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `login` | Open browser for TikTok login | `./videos login` |
+| `get` | Scrape video IDs from TikTok | `./videos get -c fitness -n 5` |
+| `list` | Show all stored videos | `./videos list` |
+| `download` | Download videos locally | `./videos download --undownloaded-only` |
+| `publish` | Upload to S3 + create metadata | `./videos publish --unpublished-only` |
+| `dedupe` | Remove duplicate entries | `./videos dedupe` |
+
+## Commands
+
+### 0. Login to TikTok (`login`)
+
+**Run this first if you haven't logged in or your session expired.**
+
+```bash
+./video_retrieval/videos login
+```
+
+This opens a browser window to TikTok's login page. Log in manually (Google, phone, etc.), wait for the feed to load, then press Enter in the terminal. Your session is saved in `browser_state/` for future commands.
+
+### 1. Scrape Videos (`get`)
+
+```bash
+# Basic: Scrape 5 videos from fitness category
+./video_retrieval/videos get -c fitness -n 5
+
+# Multiple categories
+./video_retrieval/videos get -c fitness,dance,comedy -n 3
+
+# With details extraction (slower but gets hashtags + descriptions)
+./video_retrieval/videos get -c fitness -n 3 --extract-details
+
+# Headless mode (no browser window)
+./video_retrieval/videos get -c trending -n 10 --headless
+```
+
+**Options:**
+- `-c, --categories TEXT` - Comma-separated categories (default: trending,comedy,dance)
+- `-n, --count INTEGER` - Videos per category (default: 10)
+- `-e, --extract-details` - Visit each video page to extract hashtags and description
+- `--headless` - Run browser without UI
+
+### 2. List Videos (`list`)
+
+```bash
+# List all videos
+./video_retrieval/videos list
+
+# Filter by category
+./video_retrieval/videos list -c fitness
+```
+
+### 3. Download Videos (`download`)
+
+```bash
+# Download all undownloaded videos
+./video_retrieval/videos download --undownloaded-only
+
+# Download specific video by ID
+./video_retrieval/videos download -i 7280275650265632043
+
+# Headless mode
+./video_retrieval/videos download --headless --undownloaded-only
+```
+
+**Options:**
+- `-c, --category TEXT` - Filter by category
+- `-l, --limit INTEGER` - Limit number of videos
+- `-i, --id TEXT` - Download specific video ID
+- `--undownloaded-only / --all` - Only download new videos
+- `--headless` - Run browser without UI
+
+### 4. Publish Videos (`publish`)
+
+```bash
+# Publish all unpublished videos
+./video_retrieval/videos publish --unpublished-only
+
+# Publish with mute by default
+./video_retrieval/videos publish --unpublished-only --mute-by-default
+
+# Publish from category with limit
+./video_retrieval/videos publish -c fitness -l 5 --unpublished-only
+```
+
+**Options:**
+- `-c, --category TEXT` - Filter by category
+- `-l, --limit INTEGER` - Limit number of videos
+- `-i, --id TEXT` - Publish specific video ID
+- `--unpublished-only / --all` - Only publish new videos
+- `--mute-by-default / --no-mute` - Set video mute preference
+
+**What happens during publish:**
+1. Video cropped to 9:14 aspect ratio (720x896)
+2. Uploaded to `up-staging-content` S3 bucket
+3. Metadata + hashtags saved to DynamoDB via Lambda
+4. S3 trigger invokes compression Lambda
+5. Compressed video moved to `up-compressed-content`
+
+### 5. Remove Duplicates (`dedupe`)
+
+```bash
+./video_retrieval/videos dedupe
+```
+
+## End-to-End Workflow
+
+```bash
+# 0. Login to TikTok (first time or if session expired)
+./video_retrieval/videos login
+
+# 1. Scrape videos with details (hashtags + descriptions)
+./video_retrieval/videos get -c fitness,comedy -n 5 --extract-details
+
+# 2. Verify scraped videos
+./video_retrieval/videos list
+
+# 3. Download all new videos
+./video_retrieval/videos download --undownloaded-only
+
+# 4. Publish all downloaded videos
+./video_retrieval/videos publish --unpublished-only
+
+# 5. Verify in S3
+aws s3 ls s3://up-compressed-content/ | tail -5
+```
+
+## File Structure
+
+```
+video_retrieval/
+├── videos                 # CLI executable
+├── video_ids.txt          # Video metadata storage (JSON lines)
+├── browser_state/         # Persistent browser state (login/cookies)
+└── videos_downloads/      # Downloaded video files
+```
+
+## Video Metadata Format
+
+Videos stored in `video_ids.txt`:
+
+```json
+{
+  "id": "7308066694805654826",
+  "category": "fitness",
+  "description": "",
+  "hashtags": ["fyp", "gymtok", "fitness", "motivation"],
+  "date": "2025-12-20 01:19:17",
+  "downloaded": false,
+  "published": false
+}
+```
+
+## Troubleshooting
+
+### Videos not appearing in app feed?
+- Re-scrape with `--extract-details` flag
+- Check DynamoDB `up-videometadata` table for hashtags
+
+### Scraping fails or shows captcha?
+```bash
+./video_retrieval/videos login
+```
+
+### Download fails?
+```bash
+rm -rf video_retrieval/browser_state/
+./video_retrieval/videos login
+./video_retrieval/videos download --undownloaded-only
+```
+
+### Publish fails?
+```bash
+aws sts get-caller-identity
+aws logs tail /aws/lambda/up-create-video-metadata --region us-east-2
+```
+
+### Permission denied?
+```bash
+chmod +x video_retrieval/videos
+```
+
+## AWS Infrastructure
+
+| Resource | Purpose |
+|----------|---------|
+| `up-staging-content` S3 | Initial upload bucket |
+| `up-compressed-content` S3 | Final compressed videos |
+| `up-create-video-metadata` Lambda | Save metadata to DynamoDB |
+| `up-s3-staged-to-compressed` Lambda | Compress and move videos |
+| `up-videometadata` DynamoDB | Video metadata + hashtags |
+
+## Performance
+
+- Scraping: ~2-3 videos/second (without hashtag extraction)
+- Hashtag extraction: ~3-5 seconds per video
+- Download: ~2-5 seconds per video
+- Publish: ~30-45 seconds per video (crop + upload + compress)

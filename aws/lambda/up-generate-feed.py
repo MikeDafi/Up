@@ -1,4 +1,5 @@
 import json
+import os
 import boto3
 from boto3.dynamodb.conditions import Key
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,15 @@ import time
 import traceback
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Load the feed word list for seeding new-user confidence scores
+try:
+    with open('/opt/python/feed_word_list.json') as f:
+        FEED_WORD_LIST = json.load(f)
+except FileNotFoundError:
+    _wl_path = os.path.join(os.path.dirname(__file__), 'layers', 'feed_word_list', 'feed_word_list.json')
+    with open(_wl_path) as f:
+        FEED_WORD_LIST = json.load(f)
 
 
 # Initialize the DynamoDB client
@@ -363,11 +373,16 @@ def process_individual_user(user_id, video_feed_type, limit):
     user_profile = fetch_user_profile(user_id)
     if not user_profile:
         logger.info(f"New user {user_id}, creating profile and generating discovery feed")
-        user_profiles_table.put_item(
-            Item={'user_id': user_id},
-            ConditionExpression='attribute_not_exists(user_id)',
-        )
-        user_profile = {'user_id': user_id}
+        try:
+            user_profiles_table.put_item(
+                Item={'user_id': user_id},
+                ConditionExpression='attribute_not_exists(user_id)',
+            )
+        except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+            logger.info(f"User {user_id} already exists (concurrent creation), fetching profile")
+            user_profile = fetch_user_profile(user_id)
+        if not user_profile:
+            user_profile = {'user_id': user_id}
 
     # If the batch job pre-generated a feed that's still fresh, return it immediately
     pre_generated = user_profile.get('video_feed')
@@ -385,6 +400,14 @@ def process_individual_user(user_id, video_feed_type, limit):
 
     # Get the user's hashtag to confidence scores from algorithm.<feed_type>
     hashtag_to_confidence = user_profile.get('algorithm', {}).get(video_feed_type, {}).get('hashtag_to_confidence_scores', {})
+
+    # Seed new users with word list scores so the feed algorithm picks content-appropriate hashtags
+    if not hashtag_to_confidence:
+        for tag, score in FEED_WORD_LIST.items():
+            if video_feed_type == 'VIDEO_AUDIO_FEED' and score > 0:
+                hashtag_to_confidence[tag] = Decimal(str(score))
+            elif video_feed_type == 'VIDEO_FOCUSED_FEED' and score < 0:
+                hashtag_to_confidence[tag] = Decimal(str(abs(score)))
 
     # Extract seen checksums from the profile we already fetched (avoids redundant DynamoDB read)
     seen_checksums = extract_seen_checksums(user_profile)

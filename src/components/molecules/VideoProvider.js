@@ -24,6 +24,7 @@ import {
 } from '../atoms/videoCacheStorage';
 import {VideoMetadata} from '../atoms/VideoMetadata';
 import {calculateAndUpdateConfidenceScoreCache, flushConfidenceScores} from "../atoms/confidencescores";
+import feedWordList from '../atoms/feedWordList.json';
 import TemporaryWarningBanner from "./TemporaryWarningBanner";
 import {getBlockedUsers} from '../atoms/moderation';
 
@@ -39,8 +40,29 @@ const cleanupOldAssignments = () => {
   }
 };
 
-// Deterministic feed assignment via djb2 hash — consistent regardless of processing order
-const getPreferredFeed = (videoId) => {
+// Classify a video's feed type from its hashtags using the word list.
+// Returns null when no signal-bearing hashtags match (caller falls back to DJB2).
+const classifyFeedType = (hashtags) => {
+  let totalScore = 0;
+  let signalCount = 0;
+  for (const tag of hashtags) {
+    const normalized = tag.toLowerCase().replace('#', '');
+    const score = feedWordList[normalized];
+    if (score !== undefined && score !== 0) {
+      totalScore += score;
+      signalCount += 1;
+    }
+  }
+  if (signalCount === 0) return null;
+  return (totalScore / signalCount) > 0
+    ? VideoFeedType.VIDEO_AUDIO_FEED
+    : VideoFeedType.VIDEO_FOCUSED_FEED;
+};
+
+// Deterministic feed assignment — word list first, DJB2 hash fallback for unknown content
+const getPreferredFeed = (videoId, hashtags = []) => {
+  const classified = classifyFeedType(hashtags);
+  if (classified) return classified;
   let hash = 5381;
   for (let i = 0; i < videoId.length; i++) {
     hash = ((hash << 5) + hash + videoId.charCodeAt(i)) | 0;
@@ -73,7 +95,7 @@ const deduplicateAcrossFeeds = (newVideos, currentFeedType) => {
       continue;
     }
 
-    if (getPreferredFeed(video.videoId) === currentFeedType) {
+    if (getPreferredFeed(video.videoId, video.hashtags || []) === currentFeedType) {
       firstSeenMine.push(video);
     } else {
       firstSeenOther.push(video);
@@ -333,29 +355,22 @@ const VideoProvider = ({children, video_feed_type}) => {
   useEffect(() => {
     if (!videoError) return;
 
-    setTemporaryWarning(videoError);
+    setVideoError("");
 
-    const timeout = setTimeout(() => {
-      setTemporaryWarning("");
-      setVideoError("");
+    // Silently remove the broken video and advance — no error shown to user
+    const currentIndex = videoIndexExternalViewRef.current;
+    const currentMetadatas = videoMetadatasRef.current;
+    const filtered = currentMetadatas.filter((_, i) => i !== currentIndex);
 
-      // Remove only the broken video instead of wiping the entire feed
-      const currentIndex = videoIndexExternalViewRef.current;
-      const currentMetadatas = videoMetadatasRef.current;
-      const filtered = currentMetadatas.filter((_, i) => i !== currentIndex);
-
-      if (filtered.length > 0) {
-        setVideoMetadatas(filtered);
-        setVideoMetadatasCache(video_feed_type, filtered);
-        const nextIndex = Math.min(currentIndex, filtered.length - 1);
-        triggerVideoIndex(nextIndex);
-      } else {
-        // All videos are broken — clear and let the retry useEffect re-fetch
-        setVideoMetadatas([]);
-      }
-    }, 3000);
-
-    return () => clearTimeout(timeout);
+    if (filtered.length > 0) {
+      setVideoMetadatas(filtered);
+      setVideoMetadatasCache(video_feed_type, filtered);
+      const nextIndex = Math.min(currentIndex, filtered.length - 1);
+      triggerVideoIndex(nextIndex);
+    } else {
+      // All videos are broken — clear and let the retry useEffect re-fetch
+      setVideoMetadatas([]);
+    }
   }, [videoError]);
 
   const triggerVideoIndex = async (index, scrollList = true, animated = false) => {

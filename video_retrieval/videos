@@ -293,7 +293,7 @@ def upload_to_s3(file_path, content_type="video/mp4"):
     print(f"Uploaded: s3://{STAGING_BUCKET}/{object_key}")
     return object_key
 
-def submit_media(file_path, description, hashtags, mute_by_default):
+def submit_media(file_path, description, hashtags):
     """Crop, upload to S3, invoke metadata Lambda."""
     cropped_file_path = crop_video(file_path)
 
@@ -304,7 +304,6 @@ def submit_media(file_path, description, hashtags, mute_by_default):
         "videoId": video_id,
         "description": description,
         "hashtags": hashtags,
-        "muteByDefault": mute_by_default,
     }
     print(f"Invoking Lambda with metadata: {metadata}")
 
@@ -329,16 +328,15 @@ def submit_media(file_path, description, hashtags, mute_by_default):
     return video_id, s3_base_url
 
 SEARCH_KEYWORDS = [
-    'trending',
-    'comedy',
-    'dance',
-    'food',
-    'sports',
-    'animals',
-    'fitness',
-    'travel',
-    'music',
-    'gaming',
+    # Audio-oriented
+    'music', 'comedy', 'dance', 'singing', 'rap', 'hiphop', 'standup',
+    'podcast', 'storytime', 'lipsync', 'karaoke', 'beatbox',
+    # Visual/focused-oriented
+    'food', 'recipe', 'cooking', 'satisfying', 'oddlysatisfying', 'animals',
+    'dog', 'cat', 'nature', 'diy', 'craft', 'art', 'painting', 'woodworking',
+    'calligraphy', 'gardening', 'skincare',
+    # Mixed/general
+    'fitness', 'sports', 'travel', 'gaming', 'trending',
 ]
 
 def load_video_ids():
@@ -1015,9 +1013,8 @@ async def download_videos(category, limit, id, undownloaded_only, headless):
 @click.option('--limit', '-l', default=None, type=int, help='Limit number of videos to publish')
 @click.option('--id', '-i', default=None, help='Publish a specific video ID (ignores filters)')
 @click.option('--unpublished-only/--all', default=True, help='Only publish unpublished videos')
-@click.option('--mute-by-default/--no-mute', default=True, help='Mute videos by default')
 @click.option('--cleanup/--no-cleanup', default=True, help='Delete local file after publish')
-def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
+def publish(category, limit, id, unpublished_only, cleanup):
     """Publish downloaded videos to AWS S3."""
     click.echo(click.style('='*80, fg='green'))
     click.echo(click.style('Video Publisher', fg='green', bold=True))
@@ -1095,7 +1092,7 @@ def publish(category, limit, id, unpublished_only, mute_by_default, cleanup):
                 hashtags = [category] if category else []
             hashtags = [h[:15] for h in hashtags[:20]]
             click.echo(f"  🏷️  Hashtags: {hashtags}")
-            video_id, s3_base_url = submit_media(str(file_path), description, hashtags, mute_by_default)
+            video_id, s3_base_url = submit_media(str(file_path), description, hashtags)
             
             mark_as_published(vid_id, cleanup=cleanup)
             if cleanup:

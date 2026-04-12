@@ -182,7 +182,7 @@ const VideoSlide = () => {
             refreshControl={
               <RefreshControl
                   refreshing={isRefreshing}
-                  onRefresh={fetchNewVideos}
+                  onRefresh={() => fetchNewVideos(true)}
                   tintColor="#fff"
                   style={{ zIndex: 10 }}
               />
