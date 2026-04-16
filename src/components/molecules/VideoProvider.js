@@ -430,6 +430,12 @@ const VideoProvider = ({children, video_feed_type}) => {
       setPaused(false);
       setLiked(false);
 
+      // Fetch more videos when nearing the end of the feed
+      const remainingVideos = videoMetadatasRef.current.length - newIndex;
+      if (remainingVideos <= NUM_VIDEOS_LEFT_BEFORE_FETCHING_MORE) {
+        fetchNewVideos(false, false);
+      }
+
       // Deferred: analytics for previous video + cache write (fire-and-forget)
       const currentMetadatas = videoMetadatasRef.current;
       const previousPlayer = videoSlideVideoRefs.current[previousIndex];
