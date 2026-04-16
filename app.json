@@ -5,7 +5,7 @@
     "sdkVersion": "54.0.0",
     "owner": "mike0264",
     "newArchEnabled": true,
-    "version": "1.0.1",
+    "version": "1.0.2",
     "extra": {
       "eas": {
         "projectId": "bd75a844-075d-4325-a99a-dc25a4a50d26"
