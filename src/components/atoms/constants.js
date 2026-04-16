@@ -56,6 +56,7 @@ export const HEIGHT_VIDEO_W_AUDIO_FEED = '60.5%'; // this value - PADDING_VIDEO_
 export const HEIGHT_VIDEO_W_AUDIO_VIDEO_IN_VIDEO_SLIDE = '90%';
 
 export const VIDEO_REFRESH_PERIOD_MS = 300000; // 5 minutes
+export const MAX_MANUAL_REFRESHES_PER_PERIOD = 5;
 
 export const RIGHT_PADDING_FOR_CONTROLLERS = 25;
 

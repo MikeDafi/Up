@@ -8,6 +8,7 @@ import {
   NUM_VIDEOS_TO_REQUEST,
   REATTEMPT_FETCHING_FEED_INTERVAL,
   VIDEO_REFRESH_PERIOD_MS,
+  MAX_MANUAL_REFRESHES_PER_PERIOD,
   VideoFeedType
 } from '../atoms/constants';
 import {fetchFeed} from '../atoms/dynamodb';
@@ -146,7 +147,7 @@ const VideoProvider = ({children, video_feed_type}) => {
   const [isLiked, setLiked] = useState(false);
   const [isPaused, setPaused] = useState(false);
   const [isRefreshing, setRefreshing] = useState(false);
-  const [lastTimeRefreshed, setLastTimeRefreshed] = useState(null);
+  const manualRefreshTimestamps = useRef([]);
   const videoSlideFlatListRef = useRef(null);
   const videoSlideVideoRefs = useRef([]);
   const [videoMetadatas, setVideoMetadatas] = useState([]);
@@ -258,15 +259,20 @@ const VideoProvider = ({children, video_feed_type}) => {
     }
 
     if (isManual) {
-      if (!lastTimeRefreshed || (new Date() - lastTimeRefreshed) > VIDEO_REFRESH_PERIOD_MS) {
-        setLastTimeRefreshed(new Date());
-      } else {
+      const now = Date.now();
+      const windowStart = now - VIDEO_REFRESH_PERIOD_MS;
+      manualRefreshTimestamps.current = manualRefreshTimestamps.current.filter(ts => ts > windowStart);
+      if (manualRefreshTimestamps.current.length >= MAX_MANUAL_REFRESHES_PER_PERIOD) {
         setTimeout(() => setRefreshing(false), 1000);
-        const minutes = Math.floor((VIDEO_REFRESH_PERIOD_MS - (new Date() - lastTimeRefreshed)) / 60000);
-        setTemporaryWarning(`Wait ${minutes} minutes before refreshing again`);
+        const oldestInWindow = manualRefreshTimestamps.current[0];
+        const waitMs = oldestInWindow + VIDEO_REFRESH_PERIOD_MS - now;
+        const minutes = Math.ceil(waitMs / 60000);
+        setTemporaryWarning(`Wait ${minutes} minute${minutes !== 1 ? 's' : ''} before refreshing again`);
         setTimeout(() => setTemporaryWarning(""), 2000);
+        isFetchingRef.current = false;
         return;
       }
+      manualRefreshTimestamps.current.push(now);
     }
 
     let videoMetadataBatch = [];
